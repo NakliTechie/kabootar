@@ -357,13 +357,21 @@
 
   <!-- Send -->
   <section class="panel" data-route="send">
-    <h2>Send a file</h2>
+    <h2>Send files</h2>
     <div class="row" style="margin-bottom: 8px;">
-      <input type="file" id="sendFilePicker">
+      <label class="ghost" style="cursor: pointer;">
+        Pick file(s)
+        <input type="file" id="sendFilePicker" multiple style="display: none;">
+      </label>
+      <label class="ghost" id="sendFolderLabel" style="cursor: pointer;">
+        Pick a folder
+        <input type="file" id="sendFolderPicker" webkitdirectory style="display: none;">
+      </label>
       <button class="ghost" id="send-back">Back</button>
     </div>
+    <div class="meta" id="send-files-summary" hidden></div>
     <div class="step-meta" id="send-step-meta" hidden></div>
-    <div class="status" id="send-status">Pick a file to begin.</div>
+    <div class="status" id="send-status">Pick a file or folder to begin.</div>
 
     <!-- Phase 1: show offer QR -->
     <div class="pair-card" id="send-phase-qr" hidden>
@@ -715,7 +723,13 @@ class WebRTCTransport {
 
 /* ─── Framing helpers ───────────────────────────────────────── */
 
-const TAG = { MANIFEST: 0x01, CHUNK: 0x02, DONE: 0x05 };
+const TAG = {
+  MANIFEST:    0x01,
+  CHUNK:       0x02,
+  DONE:        0x05,
+  BATCH_INTRO: 0x06,
+  BATCH_DONE:  0x07
+};
 
 function frameManifest(manifest) {
   const json = enc.encode(JSON.stringify(manifest));
@@ -738,161 +752,336 @@ function frameChunk(seq, chunkBytes) {
 
 function frameDone() { return new Uint8Array([TAG.DONE]); }
 
+function frameBatchIntro(intro) {
+  const json = enc.encode(JSON.stringify(intro));
+  const out = new Uint8Array(1 + json.length);
+  out[0] = TAG.BATCH_INTRO;
+  out.set(json, 1);
+  return out;
+}
+
+function frameBatchDone() { return new Uint8Array([TAG.BATCH_DONE]); }
+
 function parsePacket(bytes) {
   const tag = bytes[0];
-  if (tag === TAG.MANIFEST) return { tag, manifest: JSON.parse(dec.decode(bytes.subarray(1))) };
+  if (tag === TAG.MANIFEST)    return { tag, manifest: JSON.parse(dec.decode(bytes.subarray(1))) };
+  if (tag === TAG.BATCH_INTRO) return { tag, intro:    JSON.parse(dec.decode(bytes.subarray(1))) };
   if (tag === TAG.CHUNK) {
     const seq = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
     return { tag, seq: seq >>> 0, data: bytes.subarray(5) };
   }
-  if (tag === TAG.DONE) return { tag };
+  if (tag === TAG.DONE)        return { tag };
+  if (tag === TAG.BATCH_DONE)  return { tag };
   return { tag, unknown: true };
 }
 
-/* ─── Sender / receiver (same as Slice 0) ───────────────────── */
+/* ─── Sender ────────────────────────────────────────────────── */
 
-async function sendFile(transport, file, onProgress) {
+/**
+ * Send one or more files as a batch. Wire flow:
+ *   0x06 batch_intro  { count, totalBytes, files: [{name, relPath?, size, mime, sha256?}] }
+ *   for each file:
+ *     0x01 manifest  (per-file, includes relPath + sha256)
+ *     0x02 chunks (...)
+ *     0x05 done   (per-file)
+ *   0x07 batch_done
+ *
+ * onProgress(cumulativeBytes, totalBytes, fileIndex, fileCount, fileName).
+ */
+async function sendBatch(transport, files, onProgress) {
   await transport.opened;
+  if (!files || !files.length) throw new Error("No files to send");
 
-  const sha = await sha256OfFile(file);
-  const total = Math.ceil(file.size / CHUNK_SIZE);
-  const manifest = {
-    name:   file.name,
-    size:   file.size,
-    mime:   file.type || "application/octet-stream",
-    total,
-    sha256: sha
-  };
-  transport.send(frameManifest(manifest));
+  // Compute per-file SHAs once (used in batch_intro AND each manifest).
+  const fileMeta = await Promise.all(files.map(async f => {
+    const sha = await sha256OfFile(f);
+    const relPath = f.webkitRelativePath || undefined;
+    return {
+      name:    f.name,
+      relPath,
+      size:    f.size,
+      mime:    f.type || "application/octet-stream",
+      sha256:  sha
+    };
+  }));
+  const totalBytes = fileMeta.reduce((a, m) => a + m.size, 0);
 
-  let bytesSent = 0;
-  for (let seq = 0; seq < total; seq++) {
-    await transport.awaitDrain();
-    const start = seq * CHUNK_SIZE;
-    const end   = Math.min(start + CHUNK_SIZE, file.size);
-    const slice = file.slice(start, end);
-    const buf   = new Uint8Array(await slice.arrayBuffer());
-    transport.send(frameChunk(seq, buf));
-    bytesSent += buf.length;
-    if (onProgress && (seq % 32 === 0 || seq === total - 1)) {
-      onProgress(bytesSent, file.size);
+  transport.send(frameBatchIntro({
+    count: files.length,
+    totalBytes,
+    files: fileMeta
+  }));
+
+  let cumulative = 0;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const meta = fileMeta[i];
+    const total = Math.ceil(file.size / CHUNK_SIZE);
+    transport.send(frameManifest({
+      ...meta,
+      total
+    }));
+
+    for (let seq = 0; seq < total; seq++) {
+      await transport.awaitDrain();
+      const start = seq * CHUNK_SIZE;
+      const end   = Math.min(start + CHUNK_SIZE, file.size);
+      const buf   = new Uint8Array(await file.slice(start, end).arrayBuffer());
+      transport.send(frameChunk(seq, buf));
+      cumulative += buf.length;
+      if (onProgress && (seq % 32 === 0 || seq === total - 1)) {
+        onProgress(cumulative, totalBytes, i, files.length, file.name);
+      }
     }
+
+    await transport.awaitDrain();
+    transport.send(frameDone());
   }
 
   await transport.awaitDrain();
-  transport.send(frameDone());
+  transport.send(frameBatchDone());
 }
 
-async function receiveOnTransport(transport, tier, onProgress, onManifest) {
-  // onManifest, if provided, is called with (manifest, tier) and must return:
-  //   { writable }  — used as the Tier-A streaming-write target
-  //   { memory: true } — buffer in memory, save via <a download>
-  //   null / undefined — receiver declined
-  // The await on onManifest is what lets the UI satisfy the
-  // showSaveFilePicker gesture requirement: the Accept-button click
-  // handler synchronously calls showSaveFilePicker (fresh transient
-  // activation) and resolves with the resulting writable. While waiting,
-  // chunk packets queue behind the manifest in the promise chain.
-  //
-  // If onManifest is omitted, fall back to direct showSaveFilePicker —
-  // that path only works when the user gesture is still fresh (loopback
-  // page, where Loopback-Send was clicked < 5 s before manifest arrives).
+// Back-compat alias — Loopback page + tests still call sendFile by name.
+async function sendFile(transport, file, onProgress) {
+  // Translate single-file progress to batch progress (drop fileIndex args).
+  return sendBatch(transport, [file], (sent, total /* same as file.size */) => {
+    if (onProgress) onProgress(sent, total);
+  });
+}
+
+/**
+ * Walk a slash-delimited relative path on a directory handle, mkdir-as-you-go,
+ * then return a writable for the leaf file with collision-rename ((1), (2), …).
+ */
+async function ensureFileInDir(dirHandle, relPath, mime) {
+  const parts = relPath.split("/").filter(Boolean);
+  const fname = parts.pop();
+  let dir = dirHandle;
+  for (const seg of parts) {
+    dir = await dir.getDirectoryHandle(seg, { create: true });
+  }
+  // Collision rename: try create:false first; if exists, append (N).
+  const dot = fname.lastIndexOf(".");
+  const stem = dot > 0 ? fname.slice(0, dot) : fname;
+  const ext  = dot > 0 ? fname.slice(dot)    : "";
+  let candidate = fname;
+  let n = 1;
+  while (n < 1000) {
+    try {
+      await dir.getFileHandle(candidate, { create: false });
+      // Existed — bump and try again.
+      candidate = `${stem} (${n})${ext}`;
+      n++;
+    } catch (err) {
+      if (err && err.name === "NotFoundError") {
+        const fileHandle = await dir.getFileHandle(candidate, { create: true });
+        return { writable: await fileHandle.createWritable(), savedName: candidate };
+      }
+      throw err;
+    }
+  }
+  throw new Error(`Too many name collisions for ${fname}`);
+}
+
+let _jszipMod = null;
+async function loadJSZip() {
+  if (_jszipMod) return _jszipMod;
+  const m = await import("https://esm.sh/jszip@3.10.1");
+  _jszipMod = m.default || m;
+  return _jszipMod;
+}
+
+/**
+ * Receive a batch transfer. Wire flow assumed:
+ *   0x06 batch_intro  → call onBatchIntro(intro, tier, isBatch) once
+ *   0x01 manifest      → open per-file writable (or memChunks)
+ *   0x02 chunks        → write
+ *   0x05 done          → close / push to zip
+ *   ... repeat ...
+ *   0x07 batch_done    → finalize (zip download if Tier B batch)
+ *
+ * onBatchIntro must return one of:
+ *   { dirHandle }                 — Tier A batch (multi-file or folder): all
+ *                                   files written under this directory
+ *   { writable, savedName }       — Tier A single file (count=1, no relPath):
+ *                                   pre-opened from showSaveFilePicker
+ *   { memory: true }              — Tier B (single or batch): receiver
+ *                                   handles JSZip / <a download> internally
+ *   null                          — receiver declined
+ *
+ * If onBatchIntro is omitted, falls back to a direct showSaveFilePicker call
+ * (count=1 only) or memory mode — only safe inside a fresh user gesture
+ * (loopback page).
+ *
+ * onProgress(cumulativeBytes, totalBytes, fileIndex, fileCount, fileName).
+ */
+async function receiveOnTransport(transport, tier, onProgress, onBatchIntro) {
   await transport.opened;
   return new Promise((resolve, reject) => {
-    let manifest = null;
-    let writable = null;
-    let memChunks = null;
-    let received = 0;
-    let chunksSeen = 0;
-    let savedName = null;   // filename actually written (Tier A may differ from manifest)
+    let intro = null;
+    let isBatch = false;
+    let dirHandle = null;
+    let zip = null;
+    let zipName = null;
+    let perFile = null;       // active file's state (writable | memChunks | zipPending)
+    let savedNames = [];      // filenames actually written (one per file)
+    let cumulative = 0;
+    let fileIndex = -1;
     let chain = Promise.resolve();
+
+    async function defaultBatchHandler(intro, tier, isBatch) {
+      if (isBatch) {
+        // Direct call to the right picker for batches; only viable in a
+        // fresh-gesture context (loopback / tests).
+        if (tier.fsAccess && "showDirectoryPicker" in window) {
+          const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+          return { dirHandle: handle };
+        }
+        return { memory: true };
+      }
+      // Single-file case (count=1, no relPath).
+      const m = intro.files[0];
+      if (tier.fsAccess) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: m.name,
+          types: m.mime ? [{ description: "File", accept: { [m.mime]: [] } }] : undefined
+        });
+        return { writable: await handle.createWritable(), savedName: handle.name };
+      }
+      return { memory: true };
+    }
 
     async function process(bytes) {
       const pkt = parsePacket(bytes);
 
+      if (pkt.tag === TAG.BATCH_INTRO) {
+        intro = pkt.intro;
+        isBatch = intro.count > 1 || intro.files.some(f => f.relPath);
+        if (intro.totalBytes > tier.cap) {
+          transport.close();
+          throw new Error(`Batch (${fmtBytes(intro.totalBytes)}) exceeds ${tier.label} cap`);
+        }
+        const result = await (onBatchIntro
+          ? onBatchIntro(intro, tier, isBatch)
+          : defaultBatchHandler(intro, tier, isBatch));
+        if (!result) { transport.close(); throw new Error("Receiver declined"); }
+        if (result.dirHandle)       dirHandle = result.dirHandle;
+        else if (result.writable)   perFile = { _preWritable: result.writable, _preName: result.savedName };
+        else if (result.memory) {
+          if (isBatch) {
+            const JSZipMod = await loadJSZip();
+            zip = new JSZipMod();
+            // If every file shares the same first-segment relPath root,
+            // name the zip after that folder. Otherwise fall back to
+            // a generic "kabootar-N-files.zip".
+            const roots = new Set(intro.files.map(f => (f.relPath || "").split("/")[0]).filter(Boolean));
+            zipName = (roots.size === 1)
+              ? [...roots][0] + ".zip"
+              : `kabootar-${intro.count}-files.zip`;
+          }
+        }
+        return;
+      }
+
       if (pkt.tag === TAG.MANIFEST) {
-        manifest = pkt.manifest;
-
-        if (manifest.size > tier.cap) {
-          transport.close();
-          throw new Error(`File (${fmtBytes(manifest.size)}) exceeds ${tier.label} cap`);
-        }
-
-        let result;
-        if (onManifest) {
-          result = await onManifest(manifest, tier);
-        } else if (tier.fsAccess) {
-          // Direct picker call. Only safe inside a fresh user gesture.
-          const handle = await window.showSaveFilePicker({
-            suggestedName: manifest.name,
-            types: manifest.mime ? [{
-              description: "File",
-              accept: { [manifest.mime]: [] }
-            }] : undefined
-          });
-          result = { writable: await handle.createWritable(), savedName: handle.name };
+        const manifest = pkt.manifest;
+        fileIndex++;
+        if (dirHandle) {
+          // Tier A batch: per-file writable inside dirHandle, mkdir as needed.
+          const path = manifest.relPath || manifest.name;
+          const out = await ensureFileInDir(dirHandle, path, manifest.mime);
+          perFile = { writable: out.writable, savedName: out.savedName, manifest, bytesReceived: 0, chunksSeen: 0 };
+        } else if (perFile && perFile._preWritable) {
+          // Tier A single (count=1, no relPath) — writable was opened on intro.
+          perFile = {
+            writable:  perFile._preWritable,
+            savedName: perFile._preName,
+            manifest,
+            bytesReceived: 0,
+            chunksSeen: 0
+          };
         } else {
-          result = { memory: true, savedName: manifest.name };
+          // Tier B (memory): per-file memChunks, finalized on this file's 0x05 done.
+          perFile = {
+            memChunks: new Array(manifest.total),
+            savedName: manifest.relPath || manifest.name,
+            manifest,
+            bytesReceived: 0,
+            chunksSeen: 0
+          };
         }
-
-        if (!result) {
-          transport.close();
-          throw new Error("Receiver declined");
-        }
-        if (result.writable)     writable = result.writable;
-        else if (result.memory)  memChunks = new Array(manifest.total);
-        savedName = result.savedName || manifest.name;
         return;
       }
 
       if (pkt.tag === TAG.CHUNK) {
-        if (writable) {
-          await writable.write({
+        if (perFile.writable) {
+          await perFile.writable.write({
             type:     "write",
             position: pkt.seq * CHUNK_SIZE,
             data:     pkt.data
           });
-        } else {
-          memChunks[pkt.seq] = pkt.data;
+        } else if (perFile.memChunks) {
+          perFile.memChunks[pkt.seq] = pkt.data;
         }
-        received += pkt.data.length;
-        chunksSeen++;
-        if (onProgress && (chunksSeen % 32 === 0 || chunksSeen === manifest.total)) {
-          onProgress(received, manifest.size);
+        perFile.bytesReceived += pkt.data.length;
+        perFile.chunksSeen++;
+        cumulative += pkt.data.length;
+        if (onProgress && (perFile.chunksSeen % 32 === 0 || perFile.chunksSeen === perFile.manifest.total)) {
+          onProgress(cumulative, intro.totalBytes, fileIndex, intro.count, perFile.manifest.name);
         }
         return;
       }
 
       if (pkt.tag === TAG.DONE) {
-        let savedBlob = null;
-        let shaResult = null;
-        if (writable) {
-          await writable.close();
-        } else {
-          let totalBytes = 0;
-          for (const c of memChunks) totalBytes += (c ? c.length : 0);
-          const out = new Uint8Array(totalBytes);
+        if (perFile.writable) {
+          await perFile.writable.close();
+          savedNames.push(perFile.savedName);
+        } else if (perFile.memChunks) {
+          // Assemble bytes for this file
+          let total = 0;
+          for (const c of perFile.memChunks) total += (c ? c.length : 0);
+          const bytes = new Uint8Array(total);
           let off = 0;
-          for (const c of memChunks) { out.set(c, off); off += c.length; }
-          savedBlob = new Blob([out], { type: manifest.mime });
-
-          const url = URL.createObjectURL(savedBlob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = manifest.name;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(url), 60_000);
-
-          const got = await sha256OfBlob(savedBlob);
-          if (manifest.sha256 && got) {
-            shaResult = got === manifest.sha256 ? "match" : "mismatch";
+          for (const c of perFile.memChunks) { bytes.set(c, off); off += c.length; }
+          if (zip) {
+            // Batch + Tier B: add to zip; download fires on batch_done.
+            zip.file(perFile.manifest.relPath || perFile.manifest.name, bytes);
+            savedNames.push(perFile.manifest.relPath || perFile.manifest.name);
           } else {
-            shaResult = "skipped";
+            // Single-file Tier B: trigger download immediately.
+            const blob = new Blob([bytes], { type: perFile.manifest.mime });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = perFile.manifest.name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            savedNames.push(perFile.manifest.name);
           }
         }
-        resolve({ manifest, received, savedBlob, shaResult, savedName });
+        perFile = null;
+        return;
+      }
+
+      if (pkt.tag === TAG.BATCH_DONE) {
+        if (zip) {
+          const blob = await zip.generateAsync({ type: "blob" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url; a.download = zipName;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }
+        resolve({
+          intro,
+          isBatch,
+          received: cumulative,
+          savedNames,
+          // Convenience for single-file callers (loopback / paste single):
+          manifest: intro && intro.files.length === 1 ? { ...intro.files[0], total: 0 } : null,
+          savedName: savedNames[0] || null,
+          shaResult: null   // per-file SHA verification deferred to Slice 2.5
+        });
         return;
       }
     }
@@ -1050,14 +1239,18 @@ const Send = {
 
   async enter() {
     this.state = {
-      file: null,
+      files: null,
       transport: null,
       scanner: null,
-      done: false,
-      compressedAnswer: null
+      done: false
     };
     document.getElementById("sendFilePicker").value = "";
-    setStatus("send-status", "Pick a file to begin.");
+    document.getElementById("sendFolderPicker").value = "";
+    document.getElementById("send-files-summary").hidden = true;
+    // Hide the folder option on iOS — webkitdirectory is unsupported there.
+    const tier = detectTier();
+    document.getElementById("sendFolderLabel").hidden = !!tier.ios;
+    setStatus("send-status", "Pick a file or folder to begin.");
     document.getElementById("send-progress").hidden = true;
     this.setPhase("none");
   },
@@ -1070,9 +1263,21 @@ const Send = {
     }
   },
 
-  async onFileChosen(file) {
-    this.state.file = file;
-    setStatus("send-status", `Generating QR for ${file.name} (${fmtBytes(file.size)})…`);
+  async onFilesChosen(files) {
+    if (!files || !files.length) return;
+    this.state.files = files;
+    const totalBytes = files.reduce((a, f) => a + f.size, 0);
+    const summaryEl = document.getElementById("send-files-summary");
+    if (files.length === 1 && !files[0].webkitRelativePath) {
+      summaryEl.textContent = `${files[0].name} · ${fmtBytes(files[0].size)}`;
+    } else {
+      const roots = new Set(files.map(f => (f.webkitRelativePath || "").split("/")[0]).filter(Boolean));
+      const hint = (roots.size === 1) ? `folder “${[...roots][0]}”` : `${files.length} files`;
+      summaryEl.textContent = `${hint} · ${fmtBytes(totalBytes)}`;
+    }
+    summaryEl.hidden = false;
+
+    setStatus("send-status", `Generating QR for ${summaryEl.textContent}…`);
 
     // 1. Build offer SDP, gather host/.local candidates only.
     const transport = await WebRTCTransport.asInviter();
@@ -1143,18 +1348,27 @@ const Send = {
       return;
     }
 
-    setStatus("send-status", `Connected. Sending ${this.state.file.name}…`, "ok");
+    const fileCount = this.state.files.length;
+    const summary = fileCount === 1
+      ? this.state.files[0].name
+      : `${fileCount} files`;
+    setStatus("send-status", `Connected. Sending ${summary}…`, "ok");
     this.setPhase("none");
     const progressBar = document.getElementById("send-progress");
     progressBar.hidden = false;
     const progressFill = progressBar.querySelector("div");
 
     try {
-      await sendFile(this.state.transport, this.state.file, (sent, total) => {
-        progressFill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
-      });
+      await sendBatch(this.state.transport, this.state.files,
+        (sent, total, fileIndex, count, fileName) => {
+          progressFill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
+          if (count > 1) {
+            setStatus("send-status",
+              `Sending ${fileIndex + 1} of ${count}: ${fileName}…`, "ok");
+          }
+        });
       progressFill.style.width = "100%";
-      setStatus("send-status", `Done. ${this.state.file.name} delivered.`, "ok");
+      setStatus("send-status", `Done. ${summary} delivered.`, "ok");
       this.state.done = true;
     } catch (err) {
       setStatus("send-status", `Send failed: ${err.message}`, "err");
@@ -1265,13 +1479,18 @@ const Receive = {
 
     try {
       const result = await receiveOnTransport(transport, tier,
-        (recv, total) => { progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`; },
-        async (manifest, tier) => {
-          // Show Accept banner. Click handler synchronously calls
-          // showSaveFilePicker (Tier A) so the user-gesture requirement
-          // is satisfied. Returns the writable / memory choice.
-          setStatus("receive-status",
-            `Sender wants to send ${manifest.name} (${fmtBytes(manifest.size)}). Accept to save.`, "ok");
+        (recv, total, fileIndex, fileCount, fileName) => {
+          progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`;
+          if (fileCount > 1 && fileName) {
+            setStatus("receive-status",
+              `Receiving ${fileIndex + 1} of ${fileCount}: ${fileName}…`, "ok");
+          }
+        },
+        async (intro, tier, isBatch) => {
+          const summary = isBatch
+            ? `${intro.count} files (${fmtBytes(intro.totalBytes)})`
+            : `${intro.files[0].name} (${fmtBytes(intro.totalBytes)})`;
+          setStatus("receive-status", `Sender wants to send ${summary}. Accept to save.`, "ok");
           progressBar.hidden = false;
           return await showAcceptBanner({
             bannerId: "receive-accept",
@@ -1279,25 +1498,22 @@ const Receive = {
             sizeId:   "receive-accept-size",
             acceptId: "receive-accept-btn",
             rejectId: "receive-reject-btn",
-            manifest, tier,
+            intro, tier, isBatch,
             onPickerError: (err) => setStatus("receive-status",
-              `Save dialog: ${err.message}. Click Accept again to retry.`, "warn")
+              `${err.message}. Click Accept again to retry.`, "warn")
           });
         }
       );
       progressFill.style.width = "100%";
-      const name = result.savedName || result.manifest.name;
+      // Compose success message
       const where = tier.fsAccess
-        ? `Saved as “${name}” to the location you picked.`
-        : tier.ios
-          ? `Saved as “${name}” to the Files app (default Downloads).`
-          : `Saved as “${name}” to your browser's Downloads folder.`;
-      const hashTail = result.shaResult === "match"     ? " SHA-256 verified."
-                     : result.shaResult === "mismatch"  ? " WARNING: SHA-256 mismatch."
-                     : " (Large file — hash skipped.)";
-      setStatus("receive-status",
-        `Done. ${where}${hashTail}`,
-        result.shaResult === "mismatch" ? "err" : "ok");
+        ? (result.isBatch
+            ? `Saved ${result.savedNames.length} files to the folder you picked.`
+            : `Saved as “${result.savedName}” to the location you picked.`)
+        : (result.isBatch
+            ? `Saved as a zip to your ${tier.ios ? "Files app" : "Downloads folder"}.`
+            : `Saved as “${result.savedName}” to your ${tier.ios ? "Files app (default Downloads)" : "Downloads folder"}.`);
+      setStatus("receive-status", `Done. ${where}`, "ok");
       this.state.done = true;
     } catch (err) {
       setStatus("receive-status", `Receive failed: ${err.message}`, "err");
@@ -1429,21 +1645,26 @@ const Paste = {
         const tier = detectTier();
         const result = await receiveOnTransport(transport, tier,
           (recv, total) => { progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`; },
-          async (manifest, tier) => {
-            status.textContent =
-              `Sender wants to send ${manifest.name} (${fmtBytes(manifest.size)}). Accept to save.`;
+          async (intro, tier, isBatch) => {
+            const summary = isBatch
+              ? `${intro.count} files (${fmtBytes(intro.totalBytes)})`
+              : `${intro.files[0].name} (${fmtBytes(intro.totalBytes)})`;
+            status.textContent = `Sender wants to send ${summary}. Accept to save.`;
             return await showAcceptBanner({
               bannerId: "paste-accept",
               nameId:   "paste-accept-name",
               sizeId:   "paste-accept-size",
               acceptId: "paste-accept-btn",
               rejectId: "paste-reject-btn",
-              manifest, tier,
-              onPickerError: (err) => { status.textContent = `Save dialog: ${err.message}. Click Accept again.`; }
+              intro, tier, isBatch,
+              onPickerError: (err) => { status.textContent = `${err.message}. Click Accept again.`; }
             });
           }
         );
-        status.textContent = `Done. Received ${result.manifest.name} (${result.shaResult || ""}).`;
+        const tail = result.isBatch
+          ? `Received ${result.savedNames.length} files.`
+          : `Received “${result.savedName}”.`;
+        status.textContent = `Done. ${tail}`;
       } catch (err) {
         status.textContent = `Failed: ${err.message}`;
         status.className = "status err";
@@ -1480,26 +1701,43 @@ function setQRPlaceholder(id, msg) {
 }
 
 /**
- * Show a banner asking the receiver to accept an incoming file. Returns
- * a promise that resolves with { writable } / { memory: true } / null.
+ * Show a banner asking the receiver to accept an incoming batch (1+ files).
+ * Returns:
+ *   { dirHandle }          — Tier A batch: showDirectoryPicker resolved here
+ *   { writable, savedName} — Tier A single (count=1, no relPath): showSaveFilePicker
+ *   { memory: true }       — Tier B (single or batch)
+ *   null                   — declined
  *
- * Critical: the showSaveFilePicker call MUST happen synchronously inside
- * the Accept-button click handler so the user-gesture transient
- * activation flag is still set. Awaiting any IO before that call would
- * lose the gesture and the picker would throw "Must be handling a user
- * gesture to show a file picker."
+ * Critical: the picker call (showSaveFilePicker / showDirectoryPicker) MUST
+ * happen synchronously inside the Accept-button click handler so the
+ * user-gesture transient activation flag is still set. Awaiting any IO
+ * before that call would lose the gesture.
  *
  * Buttons are cloneNode-replaced before fresh listeners attach so a
  * second Receive flow doesn't double-fire stale handlers.
  */
-async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, manifest, tier, onPickerError }) {
+async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, intro, tier, isBatch, onPickerError }) {
   const banner = document.getElementById(bannerId);
-  document.getElementById(nameId).textContent = manifest.name;
-  document.getElementById(sizeId).textContent =
-    `${fmtBytes(manifest.size)} · ${manifest.mime || "unknown type"}`;
+
+  // Compose human-readable filename + size lines.
+  let nameLine, sizeLine;
+  if (isBatch) {
+    // Detect a common folder root, e.g. "vacation/day1/x.jpg" + "vacation/y.jpg"
+    // share root "vacation". If every file shares the same first segment,
+    // treat as a folder.
+    const roots = new Set(intro.files.map(f => (f.relPath || "").split("/")[0]).filter(Boolean));
+    const folderHint = (roots.size === 1) ? `folder “${[...roots][0]}”` : `${intro.count} files`;
+    nameLine = folderHint;
+    sizeLine = `${intro.count} files · ${fmtBytes(intro.totalBytes)}`;
+  } else {
+    const m = intro.files[0];
+    nameLine = m.name;
+    sizeLine = `${fmtBytes(m.size)} · ${m.mime || "unknown type"}`;
+  }
+  document.getElementById(nameId).textContent = nameLine;
+  document.getElementById(sizeId).textContent = sizeLine;
   banner.hidden = false;
 
-  // Replace each button with a clean clone so any prior listeners drop.
   const oldAccept = document.getElementById(acceptId);
   const oldReject = document.getElementById(rejectId);
   oldAccept.replaceWith(oldAccept.cloneNode(true));
@@ -1511,26 +1749,29 @@ async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, 
     acceptBtn.addEventListener("click", async () => {
       if (tier.fsAccess) {
         try {
-          const handle = await window.showSaveFilePicker({
-            suggestedName: manifest.name,
-            types: manifest.mime ? [{
-              description: "File",
-              accept: { [manifest.mime]: [] }
-            }] : undefined
-          });
-          const writable = await handle.createWritable();
-          banner.hidden = true;
-          // handle.name is the filename the user picked (may differ from
-          // sender's manifest.name if they renamed it in the dialog).
-          resolve({ writable, savedName: handle.name });
+          if (isBatch) {
+            if (!("showDirectoryPicker" in window)) {
+              throw new Error("Directory picker not supported on this browser — falling back to zip.");
+            }
+            const dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+            banner.hidden = true;
+            resolve({ dirHandle });
+          } else {
+            const m = intro.files[0];
+            const handle = await window.showSaveFilePicker({
+              suggestedName: m.name,
+              types: m.mime ? [{ description: "File", accept: { [m.mime]: [] } }] : undefined
+            });
+            const writable = await handle.createWritable();
+            banner.hidden = true;
+            resolve({ writable, savedName: handle.name });
+          }
         } catch (err) {
-          // User canceled save dialog or error — keep banner visible
-          // so they can click Accept again to re-trigger the dialog.
           if (onPickerError) onPickerError(err);
         }
       } else {
         banner.hidden = true;
-        resolve({ memory: true, savedName: manifest.name });
+        resolve({ memory: true });
       }
     });
     rejectBtn.addEventListener("click", () => {
@@ -1589,8 +1830,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Send page
   document.getElementById("send-back").addEventListener("click", () => location.hash = "");
   document.getElementById("sendFilePicker").addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) Send.onFileChosen(file);
+    const files = Array.from(e.target.files);
+    if (files.length) Send.onFilesChosen(files);
+  });
+  document.getElementById("sendFolderPicker").addEventListener("change", (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length) Send.onFilesChosen(files);
   });
   document.getElementById("send-to-camera").addEventListener("click", () => Send.openCameraForAnswer());
   document.getElementById("send-back-to-qr").addEventListener("click", () => Send.backToQR());
@@ -1652,14 +1897,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Debug API surface
   window.__kabootar = {
-    version:        "0.0.3-slice1.5",
+    version:        "0.0.4-slice2",
     tier,
-    CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW, HASH_SIZE_LIMIT, RTC_CONFIG,
+    CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW, HASH_SIZE_LIMIT, RTC_CONFIG, TAG,
     WebRTCTransport, SDPCodec,
-    runLoopback, sendFile, receiveOnTransport,
+    runLoopback, sendFile, sendBatch, receiveOnTransport,
     sha256OfFile, sha256OfBlob, sdpFingerprint,
-    parsePacket, frameManifest, frameChunk, frameDone,
-    QRScanner, renderQR, loadQR, loadJsQR,
+    parsePacket, frameManifest, frameChunk, frameDone, frameBatchIntro, frameBatchDone,
+    ensureFileInDir,
+    QRScanner, renderQR, loadQR, loadJsQR, loadJSZip,
     Send, Receive, Paste, Loopback,
     navigate,
     lastResult: null
