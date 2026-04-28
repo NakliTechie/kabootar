@@ -258,6 +258,22 @@
     justify-content: center;
   }
 
+  /* Accept banner (shown when manifest arrives on receiver) */
+  .accept-banner {
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .accept-info { display: flex; flex-direction: column; gap: 2px; }
+  .accept-info strong { font-size: 16px; }
+
   /* Loopback */
   pre#log {
     background: var(--bg);
@@ -371,6 +387,16 @@
         <div class="fingerprint" id="receive-fp" hidden></div>
       </div>
     </div>
+    <div class="accept-banner" id="receive-accept" hidden>
+      <div class="accept-info">
+        <strong id="receive-accept-name"></strong>
+        <span class="meta" id="receive-accept-size"></span>
+      </div>
+      <div class="row">
+        <button class="primary" id="receive-accept-btn">Accept &amp; save</button>
+        <button class="ghost"   id="receive-reject-btn">Reject</button>
+      </div>
+    </div>
     <div class="progress" id="receive-progress" hidden><div></div></div>
   </section>
 
@@ -401,6 +427,16 @@
     <div id="paste-file-picker" style="margin-top: 12px;" hidden>
       <div class="row">
         <input type="file" id="pasteFilePicker">
+      </div>
+    </div>
+    <div class="accept-banner" id="paste-accept" hidden>
+      <div class="accept-info">
+        <strong id="paste-accept-name"></strong>
+        <span class="meta" id="paste-accept-size"></span>
+      </div>
+      <div class="row">
+        <button class="primary" id="paste-accept-btn">Accept &amp; save</button>
+        <button class="ghost"   id="paste-reject-btn">Reject</button>
       </div>
     </div>
     <div class="progress" id="paste-progress" hidden><div></div></div>
@@ -724,6 +760,19 @@ async function sendFile(transport, file, onProgress) {
 }
 
 async function receiveOnTransport(transport, tier, onProgress, onManifest) {
+  // onManifest, if provided, is called with (manifest, tier) and must return:
+  //   { writable }  — used as the Tier-A streaming-write target
+  //   { memory: true } — buffer in memory, save via <a download>
+  //   null / undefined — receiver declined
+  // The await on onManifest is what lets the UI satisfy the
+  // showSaveFilePicker gesture requirement: the Accept-button click
+  // handler synchronously calls showSaveFilePicker (fresh transient
+  // activation) and resolves with the resulting writable. While waiting,
+  // chunk packets queue behind the manifest in the promise chain.
+  //
+  // If onManifest is omitted, fall back to direct showSaveFilePicker —
+  // that path only works when the user gesture is still fresh (loopback
+  // page, where Loopback-Send was clicked < 5 s before manifest arrives).
   await transport.opened;
   return new Promise((resolve, reject) => {
     let manifest = null;
@@ -738,14 +787,17 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
 
       if (pkt.tag === TAG.MANIFEST) {
         manifest = pkt.manifest;
-        if (onManifest) onManifest(manifest);
 
         if (manifest.size > tier.cap) {
           transport.close();
           throw new Error(`File (${fmtBytes(manifest.size)}) exceeds ${tier.label} cap`);
         }
 
-        if (tier.fsAccess) {
+        let result;
+        if (onManifest) {
+          result = await onManifest(manifest, tier);
+        } else if (tier.fsAccess) {
+          // Direct picker call. Only safe inside a fresh user gesture.
           const handle = await window.showSaveFilePicker({
             suggestedName: manifest.name,
             types: manifest.mime ? [{
@@ -753,10 +805,17 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
               accept: { [manifest.mime]: [] }
             }] : undefined
           });
-          writable = await handle.createWritable();
+          result = { writable: await handle.createWritable() };
         } else {
-          memChunks = new Array(manifest.total);
+          result = { memory: true };
         }
+
+        if (!result) {
+          transport.close();
+          throw new Error("Receiver declined");
+        }
+        if (result.writable)     writable = result.writable;
+        else if (result.memory)  memChunks = new Array(manifest.total);
         return;
       }
 
@@ -1168,15 +1227,28 @@ const Receive = {
     setStatus("receive-status", "Connected. Waiting for file…", "ok");
 
     const progressBar = document.getElementById("receive-progress");
-    progressBar.hidden = false;
     const progressFill = progressBar.querySelector("div");
 
     try {
       const result = await receiveOnTransport(transport, tier,
         (recv, total) => { progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`; },
-        (manifest) => {
+        async (manifest, tier) => {
+          // Show Accept banner. Click handler synchronously calls
+          // showSaveFilePicker (Tier A) so the user-gesture requirement
+          // is satisfied. Returns the writable / memory choice.
           setStatus("receive-status",
-            `Receiving ${manifest.name} (${fmtBytes(manifest.size)})…`, "ok");
+            `Sender wants to send ${manifest.name} (${fmtBytes(manifest.size)}). Accept to save.`, "ok");
+          progressBar.hidden = false;
+          return await showAcceptBanner({
+            bannerId: "receive-accept",
+            nameId:   "receive-accept-name",
+            sizeId:   "receive-accept-size",
+            acceptId: "receive-accept-btn",
+            rejectId: "receive-reject-btn",
+            manifest, tier,
+            onPickerError: (err) => setStatus("receive-status",
+              `Save dialog: ${err.message}. Click Accept again to retry.`, "warn")
+          });
         }
       );
       progressFill.style.width = "100%";
@@ -1314,9 +1386,22 @@ const Paste = {
         progressBar.hidden = false;
         const progressFill = progressBar.querySelector("div");
         const tier = detectTier();
-        const result = await receiveOnTransport(transport, tier, (recv, total) => {
-          progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`;
-        });
+        const result = await receiveOnTransport(transport, tier,
+          (recv, total) => { progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`; },
+          async (manifest, tier) => {
+            status.textContent =
+              `Sender wants to send ${manifest.name} (${fmtBytes(manifest.size)}). Accept to save.`;
+            return await showAcceptBanner({
+              bannerId: "paste-accept",
+              nameId:   "paste-accept-name",
+              sizeId:   "paste-accept-size",
+              acceptId: "paste-accept-btn",
+              rejectId: "paste-reject-btn",
+              manifest, tier,
+              onPickerError: (err) => { status.textContent = `Save dialog: ${err.message}. Click Accept again.`; }
+            });
+          }
+        );
         status.textContent = `Done. Received ${result.manifest.name} (${result.shaResult || ""}).`;
       } catch (err) {
         status.textContent = `Failed: ${err.message}`;
@@ -1351,6 +1436,65 @@ function setStatus(id, msg, kind) {
 function setQRPlaceholder(id, msg) {
   const el = document.getElementById(id);
   if (el) el.textContent = msg;
+}
+
+/**
+ * Show a banner asking the receiver to accept an incoming file. Returns
+ * a promise that resolves with { writable } / { memory: true } / null.
+ *
+ * Critical: the showSaveFilePicker call MUST happen synchronously inside
+ * the Accept-button click handler so the user-gesture transient
+ * activation flag is still set. Awaiting any IO before that call would
+ * lose the gesture and the picker would throw "Must be handling a user
+ * gesture to show a file picker."
+ *
+ * Buttons are cloneNode-replaced before fresh listeners attach so a
+ * second Receive flow doesn't double-fire stale handlers.
+ */
+async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, manifest, tier, onPickerError }) {
+  const banner = document.getElementById(bannerId);
+  document.getElementById(nameId).textContent = manifest.name;
+  document.getElementById(sizeId).textContent =
+    `${fmtBytes(manifest.size)} · ${manifest.mime || "unknown type"}`;
+  banner.hidden = false;
+
+  // Replace each button with a clean clone so any prior listeners drop.
+  const oldAccept = document.getElementById(acceptId);
+  const oldReject = document.getElementById(rejectId);
+  oldAccept.replaceWith(oldAccept.cloneNode(true));
+  oldReject.replaceWith(oldReject.cloneNode(true));
+  const acceptBtn = document.getElementById(acceptId);
+  const rejectBtn = document.getElementById(rejectId);
+
+  return new Promise((resolve) => {
+    acceptBtn.addEventListener("click", async () => {
+      if (tier.fsAccess) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: manifest.name,
+            types: manifest.mime ? [{
+              description: "File",
+              accept: { [manifest.mime]: [] }
+            }] : undefined
+          });
+          const writable = await handle.createWritable();
+          banner.hidden = true;
+          resolve({ writable });
+        } catch (err) {
+          // User canceled save dialog or error — keep banner visible
+          // so they can click Accept again to re-trigger the dialog.
+          if (onPickerError) onPickerError(err);
+        }
+      } else {
+        banner.hidden = true;
+        resolve({ memory: true });
+      }
+    });
+    rejectBtn.addEventListener("click", () => {
+      banner.hidden = true;
+      resolve(null);
+    }, { once: true });
+  });
 }
 
 /* ─── Hash router ───────────────────────────────────────────── */
