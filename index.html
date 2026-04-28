@@ -187,41 +187,46 @@
   .status.warn { border-color: var(--warn);   color: var(--warn); }
   .status.err  { border-color: var(--accent); color: var(--accent); }
 
-  /* Pair surface (QR + camera) */
-  .pair-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    align-items: start;
-  }
-  @media (max-width: 600px) {
-    .pair-grid { grid-template-columns: 1fr; }
+  /* Pair surface — one big card per phase (QoL pass) */
+  [hidden] { display: none !important; }
+  .step-meta {
+    margin: 4px 0 10px;
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
   }
   .pair-card {
     background: var(--bg);
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 12px;
+    padding: 14px;
     text-align: center;
+    margin: 0 auto;
+    max-width: 480px;
   }
   .pair-card h4 {
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     font-size: 13px;
     color: var(--muted);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
+  /* Use !important to defeat qrcode lib's inline-style sizing —
+     it sets canvas.style.width to the requested pixel width and would
+     otherwise push the QR past the card on narrow viewports. */
   .pair-card canvas, .pair-card video {
     display: block;
-    width: 100%;
-    height: auto;
+    width: 100% !important;
+    max-width: 100%;
+    height: auto !important;
     aspect-ratio: 1 / 1;
     background: #000;
-    border-radius: 4px;
+    border-radius: 6px;
     object-fit: cover;
   }
-  [hidden] { display: none !important; }
   .pair-card canvas.qr {
     background: #fff;
     object-fit: contain;
@@ -239,6 +244,13 @@
     color: var(--muted);
     font-size: 13px;
     padding: 8px;
+  }
+  .pair-actions-bottom {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 14px;
+    flex-wrap: wrap;
   }
   .fingerprint {
     display: inline-block;
@@ -350,20 +362,29 @@
       <input type="file" id="sendFilePicker">
       <button class="ghost" id="send-back">Back</button>
     </div>
+    <div class="step-meta" id="send-step-meta" hidden></div>
     <div class="status" id="send-status">Pick a file to begin.</div>
-    <div class="pair-grid">
-      <div class="pair-card">
-        <h4>Your QR — show this to receiver</h4>
-        <div class="placeholder" id="send-qr-placeholder">Generating…</div>
-        <canvas class="qr" id="send-qr-canvas" hidden></canvas>
-        <div class="fingerprint" id="send-fp" hidden></div>
-      </div>
-      <div class="pair-card">
-        <h4>Camera — point at receiver's QR</h4>
-        <video id="send-video" autoplay muted playsinline></video>
-        <div class="meta" id="send-cam-meta">Waiting for camera…</div>
+
+    <!-- Phase 1: show offer QR -->
+    <div class="pair-card" id="send-phase-qr" hidden>
+      <h4>Show this to the receiver</h4>
+      <canvas class="qr" id="send-qr-canvas"></canvas>
+      <div class="fingerprint" id="send-fp"></div>
+      <div class="pair-actions-bottom">
+        <button class="primary" id="send-to-camera">Now scan their QR →</button>
       </div>
     </div>
+
+    <!-- Phase 2: scan answer QR via camera -->
+    <div class="pair-card" id="send-phase-camera" hidden>
+      <h4>Scan the receiver's answer QR</h4>
+      <video id="send-video" autoplay muted playsinline></video>
+      <div class="meta" id="send-cam-meta">Requesting camera…</div>
+      <div class="pair-actions-bottom">
+        <button class="ghost" id="send-back-to-qr">← Back to my QR</button>
+      </div>
+    </div>
+
     <div class="progress" id="send-progress" hidden><div></div></div>
   </section>
 
@@ -373,20 +394,23 @@
     <div class="row" style="margin-bottom: 8px;">
       <button class="ghost" id="receive-back">Back</button>
     </div>
+    <div class="step-meta" id="receive-step-meta">Step 1 of 2</div>
     <div class="status" id="receive-status">Point your camera at the sender's QR.</div>
-    <div class="pair-grid">
-      <div class="pair-card">
-        <h4>Camera — point at sender's QR</h4>
-        <video id="receive-video" autoplay muted playsinline></video>
-        <div class="meta" id="receive-cam-meta">Waiting for camera…</div>
-      </div>
-      <div class="pair-card">
-        <h4>Your QR — show this to sender</h4>
-        <div class="placeholder" id="receive-qr-placeholder">Will appear after scan</div>
-        <canvas class="qr" id="receive-qr-canvas" hidden></canvas>
-        <div class="fingerprint" id="receive-fp" hidden></div>
-      </div>
+
+    <!-- Phase 1: scan sender's QR -->
+    <div class="pair-card" id="receive-phase-camera">
+      <h4>Scan the sender's QR</h4>
+      <video id="receive-video" autoplay muted playsinline></video>
+      <div class="meta" id="receive-cam-meta">Requesting camera…</div>
     </div>
+
+    <!-- Phase 2: show answer QR -->
+    <div class="pair-card" id="receive-phase-qr" hidden>
+      <h4>Show this back to the sender</h4>
+      <canvas class="qr" id="receive-qr-canvas"></canvas>
+      <div class="fingerprint" id="receive-fp"></div>
+    </div>
+
     <div class="accept-banner" id="receive-accept" hidden>
       <div class="accept-info">
         <strong id="receive-accept-name"></strong>
@@ -780,6 +804,7 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
     let memChunks = null;
     let received = 0;
     let chunksSeen = 0;
+    let savedName = null;   // filename actually written (Tier A may differ from manifest)
     let chain = Promise.resolve();
 
     async function process(bytes) {
@@ -805,9 +830,9 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
               accept: { [manifest.mime]: [] }
             }] : undefined
           });
-          result = { writable: await handle.createWritable() };
+          result = { writable: await handle.createWritable(), savedName: handle.name };
         } else {
-          result = { memory: true };
+          result = { memory: true, savedName: manifest.name };
         }
 
         if (!result) {
@@ -816,6 +841,7 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
         }
         if (result.writable)     writable = result.writable;
         else if (result.memory)  memChunks = new Array(manifest.total);
+        savedName = result.savedName || manifest.name;
         return;
       }
 
@@ -866,7 +892,7 @@ async function receiveOnTransport(transport, tier, onProgress, onManifest) {
             shaResult = "skipped";
           }
         }
-        resolve({ manifest, received, savedBlob, shaResult });
+        resolve({ manifest, received, savedBlob, shaResult, savedName });
         return;
       }
     }
@@ -1008,26 +1034,32 @@ class QRScanner {
   }
 }
 
-/* ─── Send flow ─────────────────────────────────────────────── */
+/* ─── Send flow (phase-based QoL pass) ──────────────────────── */
 
 const Send = {
   state: null,
+
+  setPhase(name) {
+    document.getElementById("send-phase-qr").hidden     = name !== "qr";
+    document.getElementById("send-phase-camera").hidden = name !== "camera";
+    const step = document.getElementById("send-step-meta");
+    if (name === "qr")          { step.hidden = false; step.textContent = "Step 1 of 2"; }
+    else if (name === "camera") { step.hidden = false; step.textContent = "Step 2 of 2"; }
+    else                        { step.hidden = true; }
+  },
 
   async enter() {
     this.state = {
       file: null,
       transport: null,
       scanner: null,
-      done: false
+      done: false,
+      compressedAnswer: null
     };
-    const filePicker = document.getElementById("sendFilePicker");
-    filePicker.value = "";
+    document.getElementById("sendFilePicker").value = "";
     setStatus("send-status", "Pick a file to begin.");
-    setQRPlaceholder("send-qr-placeholder", "Will appear after you pick a file");
-    document.getElementById("send-qr-canvas").hidden = true;
-    document.getElementById("send-fp").hidden = true;
-    document.getElementById("send-cam-meta").textContent = "Will start after you pick a file";
     document.getElementById("send-progress").hidden = true;
+    this.setPhase("none");
   },
 
   async exit() {
@@ -1050,26 +1082,24 @@ const Send = {
     const compressed = await SDPCodec.compress(sdp);
     const fp = await sdpFingerprint(sdp);
 
-    // 2. Render QR
-    const placeholder = document.getElementById("send-qr-placeholder");
+    // 2. Render offer QR full-width on Phase 1 card
     const canvas = document.getElementById("send-qr-canvas");
-    placeholder.hidden = true;
-    canvas.hidden = false;
     try {
-      await renderQR(canvas, "K1:" + compressed, { ecc: "M", width: 320 });
+      await renderQR(canvas, "K1:" + compressed, { ecc: "M", width: 480 });
     } catch (err) {
-      placeholder.hidden = false;
-      placeholder.textContent = `QR encoding failed: ${err.message}`;
-      canvas.hidden = true;
       setStatus("send-status", `QR encoding failed: ${err.message}`, "err");
       return;
     }
-    document.getElementById("send-fp").hidden = false;
     document.getElementById("send-fp").textContent = "·" + fp + "·";
-    setStatus("send-status", "Show this QR to the receiver. Their answer QR appears in the camera below.");
+    this.setPhase("qr");
+    setStatus("send-status", "Show this QR to the receiver. When they show their answer back, tap below.");
+  },
 
-    // 3. Open camera and scan for receiver's answer QR
-    document.getElementById("send-cam-meta").textContent = "Requesting camera…";
+  // Phase 2: open camera (user gesture from "Now scan…" button) and read
+  // the receiver's answer QR.
+  async openCameraForAnswer() {
+    this.setPhase("camera");
+    setStatus("send-status", "Now scan the receiver's answer QR.");
     const video = document.getElementById("send-video");
     const scanner = new QRScanner(video);
     this.state.scanner = scanner;
@@ -1091,18 +1121,20 @@ const Send = {
     }
 
     if (!answerCode.startsWith("K2:")) {
-      setStatus("send-status", "That QR doesn't look like a Kabootar answer. Try again.", "warn");
-      return;
+      setStatus("send-status", "That QR doesn't look like a Kabootar answer. Aim again.", "warn");
+      // Re-arm
+      try { answerCode = await scanner.readOne(); } catch { return; }
     }
 
-    setStatus("send-status", "Got receiver's QR. Connecting…");
-    const answerSdp = await SDPCodec.decompress(answerCode.slice(3));
-    await transport.acceptAnswer(answerSdp);
+    scanner.stop();
+    setStatus("send-status", "Got receiver's QR. Connecting…", "ok");
 
-    // 4. Wait for data channel to open, then send.
+    const answerSdp = await SDPCodec.decompress(answerCode.slice(3));
+    await this.state.transport.acceptAnswer(answerSdp);
+
     try {
       await Promise.race([
-        transport.opened,
+        this.state.transport.opened,
         new Promise((_, rej) => setTimeout(() => rej(new Error("connection timed out (15 s)")), 15000))
       ]);
     } catch (err) {
@@ -1111,15 +1143,14 @@ const Send = {
       return;
     }
 
-    scanner.stop();
     setStatus("send-status", `Connected. Sending ${this.state.file.name}…`, "ok");
-
+    this.setPhase("none");
     const progressBar = document.getElementById("send-progress");
     progressBar.hidden = false;
     const progressFill = progressBar.querySelector("div");
 
     try {
-      await sendFile(transport, this.state.file, (sent, total) => {
+      await sendFile(this.state.transport, this.state.file, (sent, total) => {
         progressFill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
       });
       progressFill.style.width = "100%";
@@ -1128,13 +1159,28 @@ const Send = {
     } catch (err) {
       setStatus("send-status", `Send failed: ${err.message}`, "err");
     }
+  },
+
+  backToQR() {
+    if (this.state && this.state.scanner) this.state.scanner.stop();
+    this.setPhase("qr");
+    setStatus("send-status", "Show this QR to the receiver.");
   }
 };
 
-/* ─── Receive flow ──────────────────────────────────────────── */
+/* ─── Receive flow (phase-based QoL pass) ───────────────────── */
 
 const Receive = {
   state: null,
+
+  setPhase(name) {
+    document.getElementById("receive-phase-camera").hidden = name !== "camera";
+    document.getElementById("receive-phase-qr").hidden     = name !== "qr";
+    const step = document.getElementById("receive-step-meta");
+    if (name === "camera")    { step.hidden = false; step.textContent = "Step 1 of 2"; }
+    else if (name === "qr")   { step.hidden = false; step.textContent = "Step 2 of 2"; }
+    else                      { step.hidden = true; }
+  },
 
   async enter() {
     this.state = {
@@ -1143,12 +1189,11 @@ const Receive = {
       tier: null,
       done: false
     };
+    this.setPhase("camera");
     setStatus("receive-status", "Point your camera at the sender's QR.");
-    setQRPlaceholder("receive-qr-placeholder", "Will appear after you scan the sender's QR");
-    document.getElementById("receive-qr-canvas").hidden = true;
-    document.getElementById("receive-fp").hidden = true;
     document.getElementById("receive-cam-meta").textContent = "Requesting camera…";
     document.getElementById("receive-progress").hidden = true;
+    document.getElementById("receive-accept").hidden = true;
 
     const tier = detectTier();
     this.state.tier = tier;
@@ -1174,11 +1219,8 @@ const Receive = {
     }
 
     if (!offerCode.startsWith("K1:")) {
-      setStatus("receive-status", "That QR doesn't look like a Kabootar offer. Try again.", "warn");
-      // Re-arm scanner
-      try {
-        offerCode = await scanner.readOne();
-      } catch { return; }
+      setStatus("receive-status", "That QR doesn't look like a Kabootar offer. Aim again.", "warn");
+      try { offerCode = await scanner.readOne(); } catch { return; }
     }
 
     setStatus("receive-status", "Got sender's QR. Generating answer…");
@@ -1190,25 +1232,17 @@ const Receive = {
     const ansSdp = transport.localSdp();
     const compressedAns = await SDPCodec.compress(ansSdp);
     const fpOffer  = await sdpFingerprint(offerSdp);
-    const fpAnswer = await sdpFingerprint(ansSdp);
 
-    // 3. Render answer QR
-    const placeholder = document.getElementById("receive-qr-placeholder");
+    // 3. Render answer QR + auto-flip from camera to QR phase
     const canvas = document.getElementById("receive-qr-canvas");
-    placeholder.hidden = true;
-    canvas.hidden = false;
     try {
-      await renderQR(canvas, "K2:" + compressedAns, { ecc: "M", width: 320 });
+      await renderQR(canvas, "K2:" + compressedAns, { ecc: "M", width: 480 });
     } catch (err) {
-      placeholder.hidden = false;
-      placeholder.textContent = `QR encoding failed: ${err.message}`;
-      canvas.hidden = true;
       setStatus("receive-status", `QR encoding failed: ${err.message}`, "err");
       return;
     }
-    document.getElementById("receive-fp").hidden = false;
-    // Show offer fingerprint here so user can match it against what sender shows
     document.getElementById("receive-fp").textContent = "·" + fpOffer + "·";
+    this.setPhase("qr");
     setStatus("receive-status", "Show this QR back to the sender so they can scan it.");
 
     scanner.stop();
@@ -1252,11 +1286,18 @@ const Receive = {
         }
       );
       progressFill.style.width = "100%";
-      const tail = result.shaResult === "match"   ? "SHA-256 verified."
-                : result.shaResult === "mismatch" ? "WARNING: SHA-256 mismatch."
-                : tier.fsAccess                   ? "Saved to disk."
-                : "Saved (large file — hash skipped).";
-      setStatus("receive-status", `Done. ${tail}`, result.shaResult === "mismatch" ? "err" : "ok");
+      const name = result.savedName || result.manifest.name;
+      const where = tier.fsAccess
+        ? `Saved as “${name}” to the location you picked.`
+        : tier.ios
+          ? `Saved as “${name}” to the Files app (default Downloads).`
+          : `Saved as “${name}” to your browser's Downloads folder.`;
+      const hashTail = result.shaResult === "match"     ? " SHA-256 verified."
+                     : result.shaResult === "mismatch"  ? " WARNING: SHA-256 mismatch."
+                     : " (Large file — hash skipped.)";
+      setStatus("receive-status",
+        `Done. ${where}${hashTail}`,
+        result.shaResult === "mismatch" ? "err" : "ok");
       this.state.done = true;
     } catch (err) {
       setStatus("receive-status", `Receive failed: ${err.message}`, "err");
@@ -1479,7 +1520,9 @@ async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, 
           });
           const writable = await handle.createWritable();
           banner.hidden = true;
-          resolve({ writable });
+          // handle.name is the filename the user picked (may differ from
+          // sender's manifest.name if they renamed it in the dialog).
+          resolve({ writable, savedName: handle.name });
         } catch (err) {
           // User canceled save dialog or error — keep banner visible
           // so they can click Accept again to re-trigger the dialog.
@@ -1487,7 +1530,7 @@ async function showAcceptBanner({ bannerId, nameId, sizeId, acceptId, rejectId, 
         }
       } else {
         banner.hidden = true;
-        resolve({ memory: true });
+        resolve({ memory: true, savedName: manifest.name });
       }
     });
     rejectBtn.addEventListener("click", () => {
@@ -1549,6 +1592,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const file = e.target.files[0];
     if (file) Send.onFileChosen(file);
   });
+  document.getElementById("send-to-camera").addEventListener("click", () => Send.openCameraForAnswer());
+  document.getElementById("send-back-to-qr").addEventListener("click", () => Send.backToQR());
 
   // Receive page
   document.getElementById("receive-back").addEventListener("click", () => location.hash = "");
@@ -1607,7 +1652,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Debug API surface
   window.__kabootar = {
-    version:        "0.0.2-slice1",
+    version:        "0.0.3-slice1.5",
     tier,
     CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW, HASH_SIZE_LIMIT, RTC_CONFIG,
     WebRTCTransport, SDPCodec,
