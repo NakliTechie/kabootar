@@ -111,6 +111,12 @@ There's also an in-tab loopback page (`#/loopback`) that exercises the framing +
 
 Zero build tooling. One HTML file.
 
+## Palette
+
+Coloured with **`india1-06 · नील NEEL`** — Bagru block-print indigo, the dye Gandhi went to satyagraha for in 1917 in Champaran. Trustworthy blue body, sky-blue panels, deep ink, brick-red brand mark, indigo action button. Fitting for a tool whose whole identity is "messenger across distance."
+
+Palette pulled from [**Rangrez**](https://github.com/NakliTechie/Rangrez), the colour-palette library that backs all NakliTechie projects.
+
 ---
 
 ## Part of the NakliTechie series

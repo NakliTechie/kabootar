@@ -6,26 +6,33 @@
 <meta name="color-scheme" content="light dark">
 <title>Kabootar — कबूतर</title>
 <style>
+  /* Palette: india1-06 · नील NEEL (Rangrez) — Bagru block-print, Champaran
+     indigo, the dye Gandhi went to satyagraha for in 1917. Indigo body,
+     sky-blue panels, deep ink, brick brand, indigo action button. */
   :root {
-    --bg: #f5f1e8;
-    --ink: #1a1814;
-    --muted: #6b6358;
-    --accent: #c14b3b;
-    --accent-ink: #fff;
-    --panel: #fffaf0;
-    --line: #d9d2c2;
-    --ok: #2d7a4a;
-    --warn: #b46b2a;
+    --bg:        #dfe6f0;
+    --panel:     #f2f6fb;
+    --ink:       #0a1838;
+    --muted:     #5a6c88;
+    --line:      #c0ccdd;
+    --brand:     #c8341a;
+    --accent:    #1a3a90;
+    --accent-ink:#ffffff;
+    --ok:        #3a5a2a;
+    --warn:      #b04818;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1a1814;
-      --ink: #f0e8d8;
-      --muted: #9a9080;
-      --accent: #d96050;
-      --accent-ink: #fff;
-      --panel: #252118;
-      --line: #3a3528;
+      --bg:        #050d20;
+      --panel:     #0e1a35;
+      --ink:       #d8e0ec;
+      --muted:     #7a8aa8;
+      --line:      #1c2840;
+      --brand:     #d96b50;
+      --accent:    #5a7ad0;
+      --accent-ink:#ffffff;
+      --ok:        #6a9a3a;
+      --warn:      #c87a2a;
     }
   }
   * { box-sizing: border-box; }
@@ -141,7 +148,7 @@
     cursor: pointer;
   }
   button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.ghost {
+  button.ghost, label.ghost {
     padding: 10px 18px;
     background: transparent;
     color: var(--ink);
@@ -149,8 +156,9 @@
     border-radius: 6px;
     font: inherit;
     cursor: pointer;
+    display: inline-block;
   }
-  button.ghost:hover { border-color: var(--accent); }
+  button.ghost:hover, label.ghost:hover { border-color: var(--accent); }
 
   input[type="file"] {
     flex: 1;
@@ -1897,7 +1905,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Debug API surface
   window.__kabootar = {
-    version:        "0.0.4-slice2",
+    version:        "0.0.5-slice2.1",
     tier,
     CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW, HASH_SIZE_LIMIT, RTC_CONFIG, TAG,
     WebRTCTransport, SDPCodec,
