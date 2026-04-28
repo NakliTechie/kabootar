@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Kabootar — कबूतर</title>
+<style>
+  :root {
+    --bg: #f5f1e8;
+    --ink: #1a1814;
+    --muted: #6b6358;
+    --accent: #c14b3b;
+    --accent-ink: #fff;
+    --panel: #fffaf0;
+    --line: #d9d2c2;
+    --ok: #2d7a4a;
+    --warn: #b46b2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1814;
+      --ink: #f0e8d8;
+      --muted: #9a9080;
+      --accent: #d96050;
+      --accent-ink: #fff;
+      --panel: #252118;
+      --line: #3a3528;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  main { width: 100%; max-width: 720px; }
+  header { text-align: center; margin-bottom: 24px; }
+  header h1 {
+    font-size: 32px;
+    margin: 0 0 4px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  header h1 .sub {
+    font-size: 18px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-left: 6px;
+  }
+  header .tag { color: var(--muted); font-size: 14px; margin: 0; }
+  #tier {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  #tier.tier-a { color: var(--ok); border-color: currentColor; }
+  #tier.tier-b { color: var(--warn); border-color: currentColor; }
+
+  section.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  section.panel h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  [data-route] { display: none; }
+  [data-route].active { display: block; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+  /* Landing — big choices */
+  .home-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 8px;
+  }
+  @media (max-width: 540px) {
+    .home-grid { grid-template-columns: 1fr; }
+  }
+  .home-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 22px;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color .15s, transform .05s;
+  }
+  .home-card:hover { border-color: var(--accent); }
+  .home-card:active { transform: translateY(1px); }
+  .home-card h3 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .home-card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .home-tools {
+    margin-top: 18px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .link {
+    background: none;
+    border: 0;
+    color: var(--muted);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 4px 6px;
+  }
+  .link:hover { color: var(--ink); }
+
+  /* Buttons */
+  button.primary {
+    padding: 10px 18px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: 0;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost {
+    padding: 10px 18px;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--accent); }
+
+  input[type="file"] {
+    flex: 1;
+    min-width: 0;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    color: var(--ink);
+  }
+  textarea.sdp {
+    width: 100%;
+    min-height: 90px;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+    font: 12px/1.4 ui-monospace, "SF Mono", Menlo, monospace;
+    resize: vertical;
+    word-break: break-all;
+  }
+
+  /* Status */
+  .status {
+    margin: 10px 0 14px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .status.ok   { border-color: var(--ok);     color: var(--ok); }
+  .status.warn { border-color: var(--warn);   color: var(--warn); }
+  .status.err  { border-color: var(--accent); color: var(--accent); }
+
+  /* Pair surface (QR + camera) */
+  .pair-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 600px) {
+    .pair-grid { grid-template-columns: 1fr; }
+  }
+  .pair-card {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .pair-card h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .pair-card canvas, .pair-card video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    background: #000;
+    border-radius: 4px;
+    object-fit: cover;
+  }
+  [hidden] { display: none !important; }
+  .pair-card canvas.qr {
+    background: #fff;
+    object-fit: contain;
+    image-rendering: pixelated;
+  }
+  .pair-card .placeholder {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: var(--panel);
+    border: 1px dashed var(--line);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 8px;
+  }
+  .fingerprint {
+    display: inline-block;
+    padding: 6px 12px;
+    margin-top: 10px;
+    border-radius: 999px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    font: 600 14px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.2em;
+  }
+  .pair-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* Loopback */
+  pre#log {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 12px 0 0;
+    max-height: 280px;
+    overflow: auto;
+    font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .progress {
+    height: 8px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .progress > div {
+    height: 100%;
+    background: var(--accent);
+    width: 0;
+    transition: width 0.1s linear;
+  }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .ok  { color: var(--ok); }
+  .err { color: var(--accent); }
+
+  footer {
+    margin-top: auto;
+    padding-top: 24px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>कबूतर<span class="sub">Kabootar</span></h1>
+    <p class="tag">Browser-native LocalSend · single file · no install · no server</p>
+    <div id="tier">detecting…</div>
+  </header>
+
+  <!-- Home -->
+  <section class="panel" data-route="home">
+    <h2>Send a file directly between devices on the same WiFi.</h2>
+    <p class="meta">No accounts, no servers, no internet needed once this page is loaded. Both devices scan each other's QR — that's it.</p>
+    <div class="home-grid">
+      <button class="home-card" id="home-send">
+        <h3>📤 Send a file</h3>
+        <p>Pick a file, show your QR to the other device, scan theirs back.</p>
+      </button>
+      <button class="home-card" id="home-receive">
+        <h3>📥 Receive a file</h3>
+        <p>Scan the sender's QR, show your QR back, save the file.</p>
+      </button>
+    </div>
+    <div class="home-tools">
+      <button class="link" id="home-paste">No camera? Use copy/paste mode</button>
+      <button class="link" id="home-loopback">Run in-tab loopback test</button>
+    </div>
+  </section>
+
+  <!-- Send -->
+  <section class="panel" data-route="send">
+    <h2>Send a file</h2>
+    <div class="row" style="margin-bottom: 8px;">
+      <input type="file" id="sendFilePicker">
+      <button class="ghost" id="send-back">Back</button>
+    </div>
+    <div class="status" id="send-status">Pick a file to begin.</div>
+    <div class="pair-grid">
+      <div class="pair-card">
+        <h4>Your QR — show this to receiver</h4>
+        <div class="placeholder" id="send-qr-placeholder">Generating…</div>
+        <canvas class="qr" id="send-qr-canvas" hidden></canvas>
+        <div class="fingerprint" id="send-fp" hidden></div>
+      </div>
+      <div class="pair-card">
+        <h4>Camera — point at receiver's QR</h4>
+        <video id="send-video" autoplay muted playsinline></video>
+        <div class="meta" id="send-cam-meta">Waiting for camera…</div>
+      </div>
+    </div>
+    <div class="progress" id="send-progress" hidden><div></div></div>
+  </section>
+
+  <!-- Receive -->
+  <section class="panel" data-route="receive">
+    <h2>Receive a file</h2>
+    <div class="row" style="margin-bottom: 8px;">
+      <button class="ghost" id="receive-back">Back</button>
+    </div>
+    <div class="status" id="receive-status">Point your camera at the sender's QR.</div>
+    <div class="pair-grid">
+      <div class="pair-card">
+        <h4>Camera — point at sender's QR</h4>
+        <video id="receive-video" autoplay muted playsinline></video>
+        <div class="meta" id="receive-cam-meta">Waiting for camera…</div>
+      </div>
+      <div class="pair-card">
+        <h4>Your QR — show this to sender</h4>
+        <div class="placeholder" id="receive-qr-placeholder">Will appear after scan</div>
+        <canvas class="qr" id="receive-qr-canvas" hidden></canvas>
+        <div class="fingerprint" id="receive-fp" hidden></div>
+      </div>
+    </div>
+    <div class="progress" id="receive-progress" hidden><div></div></div>
+  </section>
+
+  <!-- Paste fallback -->
+  <section class="panel" data-route="paste">
+    <h2>Copy / paste mode</h2>
+    <p class="meta">For devices without a camera. Pick a role, copy your blob into the other device, paste theirs back.</p>
+    <div class="row" style="margin-bottom: 12px;">
+      <button class="primary" id="paste-as-send">I'm sending</button>
+      <button class="primary" id="paste-as-receive">I'm receiving</button>
+      <button class="ghost" id="paste-back">Back</button>
+    </div>
+    <div id="paste-flow" hidden>
+      <div class="row" style="margin-bottom: 6px;">
+        <strong id="paste-label-out">Your blob — copy this:</strong>
+      </div>
+      <textarea class="sdp" id="paste-out" readonly></textarea>
+      <div class="row" style="margin-top: 12px; margin-bottom: 6px;">
+        <strong id="paste-label-in">Their blob — paste here:</strong>
+      </div>
+      <textarea class="sdp" id="paste-in"></textarea>
+      <div class="row" style="margin-top: 12px;">
+        <button class="primary" id="paste-submit">Submit</button>
+        <span class="fingerprint" id="paste-fp" hidden></span>
+      </div>
+      <div class="status" id="paste-status" style="margin-top: 14px;" hidden></div>
+    </div>
+    <div id="paste-file-picker" style="margin-top: 12px;" hidden>
+      <div class="row">
+        <input type="file" id="pasteFilePicker">
+      </div>
+    </div>
+    <div class="progress" id="paste-progress" hidden><div></div></div>
+  </section>
+
+  <!-- Loopback (Slice 0 regression) -->
+  <section class="panel" data-route="loopback">
+    <h2>In-tab loopback test</h2>
+    <p class="meta">Slice 0 regression: sends a file from one <code>WebRTCTransport</code> to another in the same tab. No camera, no QR — verifies framing, chunking, backpressure, and the FS Access save path.</p>
+    <div class="row" style="margin-top: 14px;">
+      <input type="file" id="loopFilePicker">
+      <button class="primary" id="loopback" disabled>Loopback send</button>
+      <button class="ghost" id="loopback-back">Back</button>
+    </div>
+    <div class="progress" id="loop-progress" hidden><div></div></div>
+    <pre id="log">Pick a file to enable loopback send.</pre>
+  </section>
+
+  <footer>
+    <p>Single HTML file · part of the <a href="https://naklitechie.github.io/" target="_blank" rel="noopener">NakliTechie</a> series</p>
+  </footer>
+</main>
+
+<script>
+"use strict";
+
+/* ============================================================
+ * Kabootar — Slice 1 (LAN-only QR-pair file send)
+ *
+ * Two devices on the same WiFi open this page. Sender picks a file →
+ * generates a WebRTC offer with `iceServers: []` (host + .local mDNS
+ * candidates only) → renders the offer SDP as a QR. Receiver scans the
+ * QR, generates an answer, renders THAT as a QR. Sender's camera reads
+ * the answer back. ICE completes via host/mDNS candidates over LAN.
+ * Zero outbound network requests once the page is loaded.
+ *
+ * Framing protocol (data channel is binary, ordered):
+ *   0x01  manifest    payload = JSON {name, size, mime, total, sha256}
+ *   0x02  chunk       payload = u32 LE seq | bytes
+ *   0x05  done        payload = empty (sender finished)
+ * (0x03 / 0x04 / 0x06 reserved for resume + cancel in Slice 2.)
+ *
+ * Chunk size: 14 KB payload. The WebRTC safe-message ceiling (~16 KB
+ * framed) is on the framed packet, not the body. See CONV.md.
+ * ============================================================ */
+
+const CHUNK_SIZE         = 14 * 1024;
+const BUFFER_HIGH        = 1024 * 1024;
+const BUFFER_LOW         = 256 * 1024;
+const HASH_SIZE_LIMIT    = 100 * 1024 * 1024;
+// Pure-LAN ICE: host candidates + Chromium's automatic .local mDNS resolution.
+// No STUN, no TURN, no relay — zero outbound network after page load.
+const RTC_CONFIG         = { iceServers: [] };
+
+/* ─── Utilities ─────────────────────────────────────────────── */
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+function hexOf(bytes) {
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return s;
+}
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+async function sha256OfFile(file) {
+  if (file.size > HASH_SIZE_LIMIT) return null;
+  const buf = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return hexOf(new Uint8Array(digest));
+}
+
+async function sha256OfBlob(blob) {
+  if (blob.size > HASH_SIZE_LIMIT) return null;
+  const buf = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return hexOf(new Uint8Array(digest));
+}
+
+async function sdpFingerprint(sdp) {
+  const buf = enc.encode(sdp);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return hexOf(new Uint8Array(digest)).slice(0, 4).toUpperCase();
+}
+
+function base64UrlEncode(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlDecode(s) {
+  const pad = s.length % 4;
+  const padded = s.replace(/-/g, "+").replace(/_/g, "/") + (pad ? "=".repeat(4 - pad) : "");
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+const Log = {
+  el: null,
+  init(el) { this.el = el; this.el.textContent = ""; },
+  line(msg, cls) {
+    if (!this.el) return;
+    const t = new Date().toISOString().slice(11, 23);
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.textContent = `[${t}] ${msg}\n`;
+    this.el.appendChild(span);
+    this.el.scrollTop = this.el.scrollHeight;
+  },
+  ok(msg)  { this.line(msg, "ok"); },
+  err(msg) { this.line(msg, "err"); },
+  reset()  { if (this.el) this.el.textContent = ""; }
+};
+
+/* ─── Capability tier ───────────────────────────────────────── */
+
+function detectTier() {
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+             || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if ("showSaveFilePicker" in window) {
+    return { name: "A", label: "Streaming save (multi-GB)", cap: Infinity, ios: false, fsAccess: true };
+  }
+  if (isIOS) {
+    return { name: "B-iOS", label: "iOS · 200 MB cap (in-memory)", cap: 200 * 1024 * 1024, ios: true, fsAccess: false };
+  }
+  return { name: "B", label: "In-memory · 500 MB cap", cap: 500 * 1024 * 1024, ios: false, fsAccess: false };
+}
+
+/* ─── SDPCodec: deflate-raw + base64url ─────────────────────── */
+
+const SDPCodec = {
+  async compress(sdp) {
+    const stream = new Blob([sdp]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+    const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+    return base64UrlEncode(buf);
+  },
+  async decompress(b64) {
+    const buf = base64UrlDecode(b64);
+    const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const arr = new Uint8Array(await new Response(stream).arrayBuffer());
+    return dec.decode(arr);
+  }
+};
+
+/* ─── WebRTC transport (ported from Mehfil §20) ─────────────── */
+
+function gatheringComplete(pc) {
+  return new Promise(resolve => {
+    if (pc.iceGatheringState === "complete") { resolve(); return; }
+    const check = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", check);
+        resolve();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", check);
+    setTimeout(resolve, 5000);
+  });
+}
+
+class WebRTCTransport {
+  constructor() {
+    this.pc = new RTCPeerConnection(RTC_CONFIG);
+    this.dc = null;
+    this.opened = new Promise(r => { this._resolveOpen = r; });
+    this.closed = new Promise(r => { this._resolveClosed = r; });
+    this.onPacket = null;
+    this.status = "connecting";
+    this.pc.addEventListener("connectionstatechange", () => {
+      const s = this.pc.connectionState;
+      if (s === "connected") this.status = "connected";
+      else if (s === "disconnected" || s === "failed" || s === "closed") {
+        this.status = "offline";
+        if (this._resolveClosed) { this._resolveClosed(); this._resolveClosed = null; }
+      }
+    });
+  }
+
+  _wireDataChannel(dc) {
+    this.dc = dc;
+    dc.binaryType = "arraybuffer";
+    dc.bufferedAmountLowThreshold = BUFFER_LOW;
+    dc.onopen = () => {
+      this.status = "connected";
+      if (this._resolveOpen) { this._resolveOpen(); this._resolveOpen = null; }
+    };
+    dc.onclose = () => { this.status = "offline"; };
+    dc.onmessage = (ev) => {
+      const bytes = new Uint8Array(ev.data);
+      if (this.onPacket) this.onPacket(bytes);
+    };
+  }
+
+  static async asInviter() {
+    const t = new WebRTCTransport();
+    const dc = t.pc.createDataChannel("kabootar", { ordered: true });
+    t._wireDataChannel(dc);
+    const offer = await t.pc.createOffer();
+    await t.pc.setLocalDescription(offer);
+    await gatheringComplete(t.pc);
+    return t;
+  }
+
+  static async asJoiner(offerSdp) {
+    const t = new WebRTCTransport();
+    t.pc.ondatachannel = (ev) => t._wireDataChannel(ev.channel);
+    await t.pc.setRemoteDescription({ type: "offer", sdp: offerSdp });
+    const answer = await t.pc.createAnswer();
+    await t.pc.setLocalDescription(answer);
+    await gatheringComplete(t.pc);
+    return t;
+  }
+
+  async acceptAnswer(answerSdp) {
+    await this.pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+  }
+
+  localSdp() { return this.pc.localDescription.sdp; }
+
+  send(bytes) {
+    if (!this.dc || this.dc.readyState !== "open") {
+      throw new Error("Data channel not open");
+    }
+    this.dc.send(bytes);
+  }
+
+  awaitDrain() {
+    if (!this.dc || this.dc.bufferedAmount < BUFFER_HIGH) return Promise.resolve();
+    return new Promise(resolve => {
+      const dc = this.dc;
+      const handler = () => { dc.removeEventListener("bufferedamountlow", handler); resolve(); };
+      dc.addEventListener("bufferedamountlow", handler);
+    });
+  }
+
+  close() {
+    try { this.dc && this.dc.close(); } catch {}
+    try { this.pc.close(); } catch {}
+    this.status = "offline";
+  }
+}
+
+/* ─── Framing helpers ───────────────────────────────────────── */
+
+const TAG = { MANIFEST: 0x01, CHUNK: 0x02, DONE: 0x05 };
+
+function frameManifest(manifest) {
+  const json = enc.encode(JSON.stringify(manifest));
+  const out = new Uint8Array(1 + json.length);
+  out[0] = TAG.MANIFEST;
+  out.set(json, 1);
+  return out;
+}
+
+function frameChunk(seq, chunkBytes) {
+  const out = new Uint8Array(1 + 4 + chunkBytes.length);
+  out[0] = TAG.CHUNK;
+  out[1] =  seq        & 0xff;
+  out[2] = (seq >>> 8 ) & 0xff;
+  out[3] = (seq >>> 16) & 0xff;
+  out[4] = (seq >>> 24) & 0xff;
+  out.set(chunkBytes, 5);
+  return out;
+}
+
+function frameDone() { return new Uint8Array([TAG.DONE]); }
+
+function parsePacket(bytes) {
+  const tag = bytes[0];
+  if (tag === TAG.MANIFEST) return { tag, manifest: JSON.parse(dec.decode(bytes.subarray(1))) };
+  if (tag === TAG.CHUNK) {
+    const seq = bytes[1] | (bytes[2] << 8) | (bytes[3] << 16) | (bytes[4] << 24);
+    return { tag, seq: seq >>> 0, data: bytes.subarray(5) };
+  }
+  if (tag === TAG.DONE) return { tag };
+  return { tag, unknown: true };
+}
+
+/* ─── Sender / receiver (same as Slice 0) ───────────────────── */
+
+async function sendFile(transport, file, onProgress) {
+  await transport.opened;
+
+  const sha = await sha256OfFile(file);
+  const total = Math.ceil(file.size / CHUNK_SIZE);
+  const manifest = {
+    name:   file.name,
+    size:   file.size,
+    mime:   file.type || "application/octet-stream",
+    total,
+    sha256: sha
+  };
+  transport.send(frameManifest(manifest));
+
+  let bytesSent = 0;
+  for (let seq = 0; seq < total; seq++) {
+    await transport.awaitDrain();
+    const start = seq * CHUNK_SIZE;
+    const end   = Math.min(start + CHUNK_SIZE, file.size);
+    const slice = file.slice(start, end);
+    const buf   = new Uint8Array(await slice.arrayBuffer());
+    transport.send(frameChunk(seq, buf));
+    bytesSent += buf.length;
+    if (onProgress && (seq % 32 === 0 || seq === total - 1)) {
+      onProgress(bytesSent, file.size);
+    }
+  }
+
+  await transport.awaitDrain();
+  transport.send(frameDone());
+}
+
+async function receiveOnTransport(transport, tier, onProgress, onManifest) {
+  await transport.opened;
+  return new Promise((resolve, reject) => {
+    let manifest = null;
+    let writable = null;
+    let memChunks = null;
+    let received = 0;
+    let chunksSeen = 0;
+    let chain = Promise.resolve();
+
+    async function process(bytes) {
+      const pkt = parsePacket(bytes);
+
+      if (pkt.tag === TAG.MANIFEST) {
+        manifest = pkt.manifest;
+        if (onManifest) onManifest(manifest);
+
+        if (manifest.size > tier.cap) {
+          transport.close();
+          throw new Error(`File (${fmtBytes(manifest.size)}) exceeds ${tier.label} cap`);
+        }
+
+        if (tier.fsAccess) {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: manifest.name,
+            types: manifest.mime ? [{
+              description: "File",
+              accept: { [manifest.mime]: [] }
+            }] : undefined
+          });
+          writable = await handle.createWritable();
+        } else {
+          memChunks = new Array(manifest.total);
+        }
+        return;
+      }
+
+      if (pkt.tag === TAG.CHUNK) {
+        if (writable) {
+          await writable.write({
+            type:     "write",
+            position: pkt.seq * CHUNK_SIZE,
+            data:     pkt.data
+          });
+        } else {
+          memChunks[pkt.seq] = pkt.data;
+        }
+        received += pkt.data.length;
+        chunksSeen++;
+        if (onProgress && (chunksSeen % 32 === 0 || chunksSeen === manifest.total)) {
+          onProgress(received, manifest.size);
+        }
+        return;
+      }
+
+      if (pkt.tag === TAG.DONE) {
+        let savedBlob = null;
+        let shaResult = null;
+        if (writable) {
+          await writable.close();
+        } else {
+          let totalBytes = 0;
+          for (const c of memChunks) totalBytes += (c ? c.length : 0);
+          const out = new Uint8Array(totalBytes);
+          let off = 0;
+          for (const c of memChunks) { out.set(c, off); off += c.length; }
+          savedBlob = new Blob([out], { type: manifest.mime });
+
+          const url = URL.createObjectURL(savedBlob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = manifest.name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+          const got = await sha256OfBlob(savedBlob);
+          if (manifest.sha256 && got) {
+            shaResult = got === manifest.sha256 ? "match" : "mismatch";
+          } else {
+            shaResult = "skipped";
+          }
+        }
+        resolve({ manifest, received, savedBlob, shaResult });
+        return;
+      }
+    }
+
+    transport.onPacket = (bytes) => {
+      chain = chain.then(() => process(bytes)).catch((err) => {
+        reject(err);
+        return Promise.resolve();
+      });
+    };
+  });
+}
+
+/* ─── Loopback (Slice 0 regression) ─────────────────────────── */
+
+async function runLoopback(file, tier, onProgress) {
+  const inviter = await WebRTCTransport.asInviter();
+  const joiner  = await WebRTCTransport.asJoiner(inviter.localSdp());
+  await inviter.acceptAnswer(joiner.localSdp());
+  await Promise.all([inviter.opened, joiner.opened]);
+
+  const recvP = receiveOnTransport(joiner, tier, onProgress);
+  const sendP = sendFile(inviter, file, onProgress);
+
+  try {
+    const [, recvResult] = await Promise.all([sendP, recvP]);
+    return recvResult;
+  } finally {
+    setTimeout(() => { inviter.close(); joiner.close(); }, 100);
+  }
+}
+
+/* ─── QR encoder (lazy esm.sh) ──────────────────────────────── */
+
+let _qrcodeMod = null;
+async function loadQR() {
+  if (_qrcodeMod) return _qrcodeMod;
+  const m = await import("https://esm.sh/qrcode@1.5.4");
+  _qrcodeMod = m.default || m;
+  return _qrcodeMod;
+}
+
+async function renderQR(canvas, text, opts = {}) {
+  const QRCode = await loadQR();
+  // Error-correction Q (≈25% recovery) — robust under camera angle / glare.
+  // Margin 2 modules — light quiet zone for camera focusing.
+  await QRCode.toCanvas(canvas, text, {
+    errorCorrectionLevel: opts.ecc || "M",
+    margin: 2,
+    width: opts.width || 280,
+    color: { dark: "#000", light: "#fff" }
+  });
+}
+
+/* ─── QR scanner (BarcodeDetector + jsQR fallback) ──────────── */
+
+let _jsqrMod = null;
+async function loadJsQR() {
+  if (_jsqrMod) return _jsqrMod;
+  const m = await import("https://esm.sh/jsqr@1.4.0");
+  _jsqrMod = m.default || m;
+  return _jsqrMod;
+}
+
+class QRScanner {
+  constructor(video) {
+    this.video = video;
+    this.active = false;
+    this._stream = null;
+    this._detector = null;
+    this._canvas = document.createElement("canvas");
+    this._ctx = this._canvas.getContext("2d", { willReadFrequently: true });
+  }
+
+  async start() {
+    if (this.active) return;
+    this._stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    });
+    this.video.srcObject = this._stream;
+    await this.video.play();
+    this.active = true;
+
+    // BarcodeDetector where available — falls back to jsQR otherwise.
+    if ("BarcodeDetector" in window) {
+      try {
+        const supported = await BarcodeDetector.getSupportedFormats();
+        if (supported.includes("qr_code")) {
+          this._detector = new BarcodeDetector({ formats: ["qr_code"] });
+        }
+      } catch {}
+    }
+  }
+
+  /**
+   * Scan continuously until a QR is read or stop() is called.
+   * Returns the rawValue string, or rejects if scanning is canceled.
+   */
+  async readOne() {
+    while (this.active) {
+      if (this.video.readyState >= 2 && this.video.videoWidth > 0) {
+        const result = await this._tryDecode();
+        if (result) return result;
+      }
+      await new Promise(r => setTimeout(r, 120));
+    }
+    throw new Error("scanner canceled");
+  }
+
+  async _tryDecode() {
+    if (this._detector) {
+      try {
+        const codes = await this._detector.detect(this.video);
+        if (codes && codes.length) return codes[0].rawValue;
+      } catch {}
+    }
+    // jsQR fallback (or BarcodeDetector failed silently)
+    const w = this.video.videoWidth, h = this.video.videoHeight;
+    if (!w || !h) return null;
+    this._canvas.width = w;
+    this._canvas.height = h;
+    this._ctx.drawImage(this.video, 0, 0, w, h);
+    const img = this._ctx.getImageData(0, 0, w, h);
+    try {
+      const jsQR = await loadJsQR();
+      const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+      if (code && code.data) return code.data;
+    } catch {}
+    return null;
+  }
+
+  stop() {
+    this.active = false;
+    if (this._stream) {
+      for (const t of this._stream.getTracks()) t.stop();
+      this._stream = null;
+    }
+    if (this.video) this.video.srcObject = null;
+  }
+}
+
+/* ─── Send flow ─────────────────────────────────────────────── */
+
+const Send = {
+  state: null,
+
+  async enter() {
+    this.state = {
+      file: null,
+      transport: null,
+      scanner: null,
+      done: false
+    };
+    const filePicker = document.getElementById("sendFilePicker");
+    filePicker.value = "";
+    setStatus("send-status", "Pick a file to begin.");
+    setQRPlaceholder("send-qr-placeholder", "Will appear after you pick a file");
+    document.getElementById("send-qr-canvas").hidden = true;
+    document.getElementById("send-fp").hidden = true;
+    document.getElementById("send-cam-meta").textContent = "Will start after you pick a file";
+    document.getElementById("send-progress").hidden = true;
+  },
+
+  async exit() {
+    if (this.state) {
+      if (this.state.scanner) this.state.scanner.stop();
+      if (this.state.transport) this.state.transport.close();
+      this.state = null;
+    }
+  },
+
+  async onFileChosen(file) {
+    this.state.file = file;
+    setStatus("send-status", `Generating QR for ${file.name} (${fmtBytes(file.size)})…`);
+
+    // 1. Build offer SDP, gather host/.local candidates only.
+    const transport = await WebRTCTransport.asInviter();
+    this.state.transport = transport;
+
+    const sdp = transport.localSdp();
+    const compressed = await SDPCodec.compress(sdp);
+    const fp = await sdpFingerprint(sdp);
+
+    // 2. Render QR
+    const placeholder = document.getElementById("send-qr-placeholder");
+    const canvas = document.getElementById("send-qr-canvas");
+    placeholder.hidden = true;
+    canvas.hidden = false;
+    try {
+      await renderQR(canvas, "K1:" + compressed, { ecc: "M", width: 320 });
+    } catch (err) {
+      placeholder.hidden = false;
+      placeholder.textContent = `QR encoding failed: ${err.message}`;
+      canvas.hidden = true;
+      setStatus("send-status", `QR encoding failed: ${err.message}`, "err");
+      return;
+    }
+    document.getElementById("send-fp").hidden = false;
+    document.getElementById("send-fp").textContent = "·" + fp + "·";
+    setStatus("send-status", "Show this QR to the receiver. Their answer QR appears in the camera below.");
+
+    // 3. Open camera and scan for receiver's answer QR
+    document.getElementById("send-cam-meta").textContent = "Requesting camera…";
+    const video = document.getElementById("send-video");
+    const scanner = new QRScanner(video);
+    this.state.scanner = scanner;
+
+    try {
+      await scanner.start();
+      document.getElementById("send-cam-meta").textContent = "Point camera at receiver's QR.";
+    } catch (err) {
+      setStatus("send-status",
+        `Camera unavailable (${err.name}). Use copy/paste mode instead.`, "err");
+      return;
+    }
+
+    let answerCode;
+    try {
+      answerCode = await scanner.readOne();
+    } catch {
+      return; // canceled
+    }
+
+    if (!answerCode.startsWith("K2:")) {
+      setStatus("send-status", "That QR doesn't look like a Kabootar answer. Try again.", "warn");
+      return;
+    }
+
+    setStatus("send-status", "Got receiver's QR. Connecting…");
+    const answerSdp = await SDPCodec.decompress(answerCode.slice(3));
+    await transport.acceptAnswer(answerSdp);
+
+    // 4. Wait for data channel to open, then send.
+    try {
+      await Promise.race([
+        transport.opened,
+        new Promise((_, rej) => setTimeout(() => rej(new Error("connection timed out (15 s)")), 15000))
+      ]);
+    } catch (err) {
+      setStatus("send-status",
+        `${err.message}. Make sure both devices are on the same WiFi.`, "err");
+      return;
+    }
+
+    scanner.stop();
+    setStatus("send-status", `Connected. Sending ${this.state.file.name}…`, "ok");
+
+    const progressBar = document.getElementById("send-progress");
+    progressBar.hidden = false;
+    const progressFill = progressBar.querySelector("div");
+
+    try {
+      await sendFile(transport, this.state.file, (sent, total) => {
+        progressFill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
+      });
+      progressFill.style.width = "100%";
+      setStatus("send-status", `Done. ${this.state.file.name} delivered.`, "ok");
+      this.state.done = true;
+    } catch (err) {
+      setStatus("send-status", `Send failed: ${err.message}`, "err");
+    }
+  }
+};
+
+/* ─── Receive flow ──────────────────────────────────────────── */
+
+const Receive = {
+  state: null,
+
+  async enter() {
+    this.state = {
+      transport: null,
+      scanner: null,
+      tier: null,
+      done: false
+    };
+    setStatus("receive-status", "Point your camera at the sender's QR.");
+    setQRPlaceholder("receive-qr-placeholder", "Will appear after you scan the sender's QR");
+    document.getElementById("receive-qr-canvas").hidden = true;
+    document.getElementById("receive-fp").hidden = true;
+    document.getElementById("receive-cam-meta").textContent = "Requesting camera…";
+    document.getElementById("receive-progress").hidden = true;
+
+    const tier = detectTier();
+    this.state.tier = tier;
+
+    // 1. Open camera and scan for sender's QR.
+    const video = document.getElementById("receive-video");
+    const scanner = new QRScanner(video);
+    this.state.scanner = scanner;
+    try {
+      await scanner.start();
+      document.getElementById("receive-cam-meta").textContent = "Point camera at sender's QR.";
+    } catch (err) {
+      setStatus("receive-status",
+        `Camera unavailable (${err.name}). Use copy/paste mode instead.`, "err");
+      return;
+    }
+
+    let offerCode;
+    try {
+      offerCode = await scanner.readOne();
+    } catch {
+      return; // canceled
+    }
+
+    if (!offerCode.startsWith("K1:")) {
+      setStatus("receive-status", "That QR doesn't look like a Kabootar offer. Try again.", "warn");
+      // Re-arm scanner
+      try {
+        offerCode = await scanner.readOne();
+      } catch { return; }
+    }
+
+    setStatus("receive-status", "Got sender's QR. Generating answer…");
+    const offerSdp = await SDPCodec.decompress(offerCode.slice(3));
+
+    // 2. Build answer with iceServers:[]
+    const transport = await WebRTCTransport.asJoiner(offerSdp);
+    this.state.transport = transport;
+    const ansSdp = transport.localSdp();
+    const compressedAns = await SDPCodec.compress(ansSdp);
+    const fpOffer  = await sdpFingerprint(offerSdp);
+    const fpAnswer = await sdpFingerprint(ansSdp);
+
+    // 3. Render answer QR
+    const placeholder = document.getElementById("receive-qr-placeholder");
+    const canvas = document.getElementById("receive-qr-canvas");
+    placeholder.hidden = true;
+    canvas.hidden = false;
+    try {
+      await renderQR(canvas, "K2:" + compressedAns, { ecc: "M", width: 320 });
+    } catch (err) {
+      placeholder.hidden = false;
+      placeholder.textContent = `QR encoding failed: ${err.message}`;
+      canvas.hidden = true;
+      setStatus("receive-status", `QR encoding failed: ${err.message}`, "err");
+      return;
+    }
+    document.getElementById("receive-fp").hidden = false;
+    // Show offer fingerprint here so user can match it against what sender shows
+    document.getElementById("receive-fp").textContent = "·" + fpOffer + "·";
+    setStatus("receive-status", "Show this QR back to the sender so they can scan it.");
+
+    scanner.stop();
+
+    // 4. Wait for connection
+    try {
+      await Promise.race([
+        transport.opened,
+        new Promise((_, rej) => setTimeout(() => rej(new Error("connection timed out (15 s)")), 15000))
+      ]);
+    } catch (err) {
+      setStatus("receive-status",
+        `${err.message}. Make sure both devices are on the same WiFi.`, "err");
+      return;
+    }
+    setStatus("receive-status", "Connected. Waiting for file…", "ok");
+
+    const progressBar = document.getElementById("receive-progress");
+    progressBar.hidden = false;
+    const progressFill = progressBar.querySelector("div");
+
+    try {
+      const result = await receiveOnTransport(transport, tier,
+        (recv, total) => { progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`; },
+        (manifest) => {
+          setStatus("receive-status",
+            `Receiving ${manifest.name} (${fmtBytes(manifest.size)})…`, "ok");
+        }
+      );
+      progressFill.style.width = "100%";
+      const tail = result.shaResult === "match"   ? "SHA-256 verified."
+                : result.shaResult === "mismatch" ? "WARNING: SHA-256 mismatch."
+                : tier.fsAccess                   ? "Saved to disk."
+                : "Saved (large file — hash skipped).";
+      setStatus("receive-status", `Done. ${tail}`, result.shaResult === "mismatch" ? "err" : "ok");
+      this.state.done = true;
+    } catch (err) {
+      setStatus("receive-status", `Receive failed: ${err.message}`, "err");
+    }
+  },
+
+  async exit() {
+    if (this.state) {
+      if (this.state.scanner) this.state.scanner.stop();
+      if (this.state.transport) this.state.transport.close();
+      this.state = null;
+    }
+  }
+};
+
+/* ─── Paste / copy fallback flow ────────────────────────────── */
+
+const Paste = {
+  state: null,
+
+  async enter() {
+    this.state = { mode: null };
+    document.getElementById("paste-flow").hidden = true;
+    document.getElementById("paste-progress").hidden = true;
+    document.getElementById("paste-file-picker").hidden = true;
+    const status = document.getElementById("paste-status");
+    status.hidden = true;
+  },
+
+  async exit() {
+    if (this.state) {
+      if (this.state.transport) this.state.transport.close();
+      if (this.state.scanner) this.state.scanner.stop?.();
+      this.state = null;
+    }
+  },
+
+  async asSend() {
+    this.state.mode = "send";
+    document.getElementById("paste-file-picker").hidden = false;
+    document.getElementById("paste-flow").hidden = true;
+    document.getElementById("pasteFilePicker").value = "";
+    document.getElementById("pasteFilePicker").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      this.state.file = file;
+      const transport = await WebRTCTransport.asInviter();
+      this.state.transport = transport;
+      const sdp = transport.localSdp();
+      const fp  = await sdpFingerprint(sdp);
+      document.getElementById("paste-out").value = "K1:" + await SDPCodec.compress(sdp);
+      document.getElementById("paste-label-out").textContent = "Your blob (copy to receiver):";
+      document.getElementById("paste-label-in").textContent  = "Paste receiver's blob (K2:…) here:";
+      document.getElementById("paste-fp").textContent = "·" + fp + "·";
+      document.getElementById("paste-fp").hidden = false;
+      document.getElementById("paste-flow").hidden = false;
+    };
+  },
+
+  async asReceive() {
+    this.state.mode = "receive";
+    document.getElementById("paste-file-picker").hidden = true;
+    document.getElementById("paste-flow").hidden = false;
+    document.getElementById("paste-out").value = "(paste sender's blob first, then submit)";
+    document.getElementById("paste-label-out").textContent = "Your blob (will appear after you submit):";
+    document.getElementById("paste-label-in").textContent  = "Paste sender's blob (K1:…) here:";
+    document.getElementById("paste-fp").hidden = true;
+  },
+
+  async submit() {
+    const input = document.getElementById("paste-in").value.trim();
+    if (!input) return;
+    const status = document.getElementById("paste-status");
+    status.hidden = false;
+    status.className = "status";
+
+    if (this.state.mode === "send") {
+      if (!input.startsWith("K2:")) {
+        status.textContent = "Expected receiver blob starting with K2:";
+        status.className = "status err";
+        return;
+      }
+      const ansSdp = await SDPCodec.decompress(input.slice(3));
+      try {
+        await this.state.transport.acceptAnswer(ansSdp);
+        await Promise.race([
+          this.state.transport.opened,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timed out")), 15000))
+        ]);
+        status.textContent = `Connected. Sending ${this.state.file.name}…`;
+        status.className = "status ok";
+        const progressBar = document.getElementById("paste-progress");
+        progressBar.hidden = false;
+        const progressFill = progressBar.querySelector("div");
+        await sendFile(this.state.transport, this.state.file, (sent, total) => {
+          progressFill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
+        });
+        status.textContent = `Done. Sent ${this.state.file.name}.`;
+      } catch (err) {
+        status.textContent = `Failed: ${err.message}`;
+        status.className = "status err";
+      }
+    } else {
+      // Receiver
+      if (!input.startsWith("K1:")) {
+        status.textContent = "Expected sender blob starting with K1:";
+        status.className = "status err";
+        return;
+      }
+      const offerSdp = await SDPCodec.decompress(input.slice(3));
+      const transport = await WebRTCTransport.asJoiner(offerSdp);
+      this.state.transport = transport;
+      const sdp = transport.localSdp();
+      const fp  = await sdpFingerprint(offerSdp);
+      document.getElementById("paste-out").value = "K2:" + await SDPCodec.compress(sdp);
+      document.getElementById("paste-label-out").textContent = "Your blob (copy to sender):";
+      document.getElementById("paste-fp").textContent = "·" + fp + "·";
+      document.getElementById("paste-fp").hidden = false;
+      try {
+        await Promise.race([
+          transport.opened,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timed out")), 30000))
+        ]);
+        status.textContent = "Connected. Waiting for file…";
+        status.className = "status ok";
+        const progressBar = document.getElementById("paste-progress");
+        progressBar.hidden = false;
+        const progressFill = progressBar.querySelector("div");
+        const tier = detectTier();
+        const result = await receiveOnTransport(transport, tier, (recv, total) => {
+          progressFill.style.width = `${((recv / total) * 100).toFixed(1)}%`;
+        });
+        status.textContent = `Done. Received ${result.manifest.name} (${result.shaResult || ""}).`;
+      } catch (err) {
+        status.textContent = `Failed: ${err.message}`;
+        status.className = "status err";
+      }
+    }
+  }
+};
+
+/* ─── Loopback page wiring (unchanged from Slice 0) ─────────── */
+
+const Loopback = {
+  async enter() {
+    Log.init(document.getElementById("log"));
+    Log.line("ready — pick a file to enable Loopback Send.");
+    document.getElementById("loopFilePicker").value = "";
+    document.getElementById("loopback").disabled = true;
+    document.getElementById("loop-progress").hidden = true;
+  },
+  async exit() {}
+};
+
+/* ─── UI helpers ────────────────────────────────────────────── */
+
+function setStatus(id, msg, kind) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+
+function setQRPlaceholder(id, msg) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = msg;
+}
+
+/* ─── Hash router ───────────────────────────────────────────── */
+
+const Routes = {
+  "":           { enter: () => {}, exit: () => {} },
+  "/send":      Send,
+  "/receive":   Receive,
+  "/paste":     Paste,
+  "/loopback":  Loopback
+};
+
+let _currentRoute = null;
+
+async function navigate(routeKey) {
+  if (_currentRoute && _currentRoute !== routeKey) {
+    const prev = Routes[_currentRoute];
+    if (prev && prev.exit) await prev.exit();
+  }
+  _currentRoute = routeKey;
+  // Show the right pane
+  for (const el of document.querySelectorAll("[data-route]")) {
+    el.classList.toggle("active", el.dataset.route === (routeKey === "" ? "home" : routeKey.slice(1)));
+  }
+  const handler = Routes[routeKey];
+  if (handler && handler.enter) await handler.enter();
+}
+
+function onHashChange() {
+  const h = location.hash.replace(/^#/, "");
+  navigate(h in Routes ? h : "");
+}
+
+/* ─── Boot ──────────────────────────────────────────────────── */
+
+document.addEventListener("DOMContentLoaded", async () => {
+  // Tier badge
+  const tier = detectTier();
+  const tierEl = document.getElementById("tier");
+  tierEl.textContent = `Tier ${tier.name} · ${tier.label}`;
+  tierEl.className = tier.fsAccess ? "tier-a" : "tier-b";
+
+  // Home buttons
+  document.getElementById("home-send").addEventListener("click",     () => location.hash = "#/send");
+  document.getElementById("home-receive").addEventListener("click",  () => location.hash = "#/receive");
+  document.getElementById("home-paste").addEventListener("click",    () => location.hash = "#/paste");
+  document.getElementById("home-loopback").addEventListener("click", () => location.hash = "#/loopback");
+
+  // Send page
+  document.getElementById("send-back").addEventListener("click", () => location.hash = "");
+  document.getElementById("sendFilePicker").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) Send.onFileChosen(file);
+  });
+
+  // Receive page
+  document.getElementById("receive-back").addEventListener("click", () => location.hash = "");
+
+  // Paste page
+  document.getElementById("paste-back").addEventListener("click", () => location.hash = "");
+  document.getElementById("paste-as-send").addEventListener("click", () => Paste.asSend());
+  document.getElementById("paste-as-receive").addEventListener("click", () => Paste.asReceive());
+  document.getElementById("paste-submit").addEventListener("click", () => Paste.submit());
+
+  // Loopback page
+  document.getElementById("loopback-back").addEventListener("click", () => location.hash = "");
+  const loopFilePicker = document.getElementById("loopFilePicker");
+  const loopBtn = document.getElementById("loopback");
+  loopFilePicker.addEventListener("change", () => {
+    loopBtn.disabled = loopFilePicker.files.length === 0;
+    if (loopFilePicker.files.length) {
+      const f = loopFilePicker.files[0];
+      Log.reset();
+      Log.line(`selected: ${f.name} · ${fmtBytes(f.size)} · ${f.type || "(no mime)"}`);
+    }
+  });
+  loopBtn.addEventListener("click", async () => {
+    const file = loopFilePicker.files[0];
+    if (!file) return;
+    loopBtn.disabled = true;
+    document.getElementById("loop-progress").hidden = false;
+    const fill = document.querySelector("#loop-progress > div");
+    fill.style.width = "0%";
+    try {
+      const result = await runLoopback(file, tier, (sent, total) => {
+        fill.style.width = `${((sent / total) * 100).toFixed(1)}%`;
+      });
+      fill.style.width = "100%";
+      Log.ok(`loopback: complete · ${result.manifest.name} (${result.shaResult || "saved"})`);
+      window.__kabootar.lastResult = result;
+    } catch (err) {
+      Log.err(`loopback failed: ${err.message}`);
+    } finally {
+      loopBtn.disabled = false;
+    }
+  });
+
+  // Router
+  window.addEventListener("hashchange", onHashChange);
+  await onHashChange();
+
+  // Pre-warm CDN dependencies (qrcode + jsQR) so the page works offline
+  // after the first load. Both are <30 KB combined; we don't await so
+  // they don't block the home screen render.
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(() => { loadQR().catch(() => {}); loadJsQR().catch(() => {}); });
+  } else {
+    setTimeout(() => { loadQR().catch(() => {}); loadJsQR().catch(() => {}); }, 500);
+  }
+
+  // Debug API surface
+  window.__kabootar = {
+    version:        "0.0.2-slice1",
+    tier,
+    CHUNK_SIZE, BUFFER_HIGH, BUFFER_LOW, HASH_SIZE_LIMIT, RTC_CONFIG,
+    WebRTCTransport, SDPCodec,
+    runLoopback, sendFile, receiveOnTransport,
+    sha256OfFile, sha256OfBlob, sdpFingerprint,
+    parsePacket, frameManifest, frameChunk, frameDone,
+    QRScanner, renderQR, loadQR, loadJsQR,
+    Send, Receive, Paste, Loopback,
+    navigate,
+    lastResult: null
+  };
+  console.log(`[Kabootar] ready · tier ${tier.name} · debug API: window.__kabootar`);
+});
+</script>
+</body>
+</html>
